@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
 
-TOKEN = "8773850466:AAF0ZYcuNusn9R8TzyxQRCZoY2Nz2pg6MiA"
+TOKEN = "ТВОЙ_ТОКЕН"
 
 
 # === Поиск символа ===
@@ -109,19 +109,69 @@ def create_chart(df):
 
         plt.title("Market Structure")
         plt.grid(False)
-TP1: {round(tp1, 4)}
-TP2: {round(tp2, 4)}
-TP3: {round(tp3, 4)}
 
-Почему:
+        plt.savefig("chart.png")
+        plt.close()
+
+        return True
+
+    except Exception as e:
+        print("CHART ERROR:", e)
+        return False
+
+
+# === Обработка ===
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_input = update.message.text.upper()
+    symbol = find_symbol(user_input)
+
+    if symbol is None:
+        await update.message.reply_text("❌ Монета не найдена")
+        return
+
+    df = get_klines(symbol)
+
+    if df is None or df.empty:
+        await update.message.reply_text("❌ Монета не найдена")
+        return
+
+    try:
+        price, direction, reason = analyze(df)
+        stop, tp1, tp2, tp3 = calculate_levels(df, price, direction)
+
+        # 📊 график
+        create_chart(df)
+        try:
+            with open("chart.png", "rb") as img:
+                await update.message.reply_photo(img)
+        except Exception as e:
+            print("SEND ERROR:", e)
+
+        # 📩 текст
+        text = f"""
+📊 {symbol}/USDT
+
+📌 {direction}
+
+💰 Цена: {round(price, 4)}
+
+📍 Вход: {round(price, 4)}
+🛑 Стоп: {round(stop, 4)}
+
+🎯 Тейки:
+• TP1: {round(tp1, 4)}
+• TP2: {round(tp2, 4)}
+• TP3: {round(tp3, 4)}
+
+🧠 Почему:
 {reason}
 
-Таймфрейм: 15 m
+📊 Таймфрейм: 15m
 
-Риск: 1 - 2 % от депозита
+⚠️ Риск: 1-2% от депозита
 
- 
- Оценивайте свои финансовые возможности и риски
+—————————————
+• Оценивайте свои финансовые возможности и риски
         """
 
         await update.message.reply_text(text)
