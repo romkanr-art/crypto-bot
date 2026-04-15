@@ -187,7 +187,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • Оценивайте свои финансовые возможности и риски
         """
 
-    await update.message.reply_text(text)
+        await update.message.reply_text(text)
 
     except Exception as e:
         print("ERROR:", e)
