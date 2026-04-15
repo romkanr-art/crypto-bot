@@ -109,9 +109,9 @@ def create_chart(df):
 
         plt.title("Market Structure")
         plt.grid(False)
-• TP1: {round(tp1, 4)}
-• TP2: {round(tp2, 4)}
-• TP3: {round(tp3, 4)}
+TP1: {round(tp1, 4)}
+TP2: {round(tp2, 4)}
+TP3: {round(tp3, 4)}
 
 🧠 Почему:
 {reason}
