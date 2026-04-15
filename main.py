@@ -167,7 +167,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 try:
     price, direction, stop, tp1, tp2, tp3, reason = analyze(df)
-
+# ✅ сначала график
+    if create_chart(df):
+        with open("chart.png", "rb") as img:
+            await update.message.reply_photo(img)
+            
     text = f"""
 📊 {symbol}/USDT
 
@@ -192,10 +196,6 @@ try:
 • Оценивайте свои финансовые возможности и риски
     """
 
-    # ✅ сначала график
-    if create_chart(df):
-        with open("chart.png", "rb") as img:
-            await update.message.reply_photo(img)
 
     # ✅ потом текст
     await update.message.reply_text(text)
