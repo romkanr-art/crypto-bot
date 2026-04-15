@@ -12,7 +12,7 @@ from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTyp
 
 
 
-TOKEN = "ТВОЙ_ТОКЕН"
+TOKEN = "8773850466:AAF0ZYcuNusn9R8TzyxQRCZoY2Nz2pg6MiA"
 
 
 
