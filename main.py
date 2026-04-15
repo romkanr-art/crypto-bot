@@ -3,7 +3,7 @@ import requests
 
 import pandas as pd
 
-import matplotlib.pyplot as plt
+import mplfinance as mpf
 
 
 
@@ -13,29 +13,47 @@ from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTyp
 
 
 
-TOKEN = "8773850466:AAF0ZYcuNusn9R8TzyxQRCZoY2Nz2pg6MiA"
+TOKEN = "ТВОЙ_ТОКЕН"
 
 
 
 
 
-# === Получение цены ===
+# === Получаем свечи ===
 
-def get_price(symbol):
+def get_klines(symbol):
 
-    url = f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}USDT"
+    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}USDT&interval=15m&limit=100"
 
     data = requests.get(url).json()
 
 
 
-    if "price" not in data:
+    df = pd.DataFrame(data)
 
-        return None
+    df = df[[0,1,2,3,4,5]]
+
+    df.columns = ["time","open","high","low","close","volume"]
 
 
 
-    return float(data["price"])
+    df["open"] = df["open"].astype(float)
+
+    df["high"] = df["high"].astype(float)
+
+    df["low"] = df["low"].astype(float)
+
+    df["close"] = df["close"].astype(float)
+
+
+
+    df["time"] = pd.to_datetime(df["time"], unit='ms')
+
+    df.set_index("time", inplace=True)
+
+
+
+    return df
 
 
 
@@ -43,31 +61,33 @@ def get_price(symbol):
 
 # === Анализ ===
 
-def analyze(symbol):
+def analyze(df):
 
-    price = get_price(symbol)
+    df["ema20"] = df["close"].ewm(span=20).mean()
 
-
-
-    if price is None:
-
-        return None
+    df["ema50"] = df["close"].ewm(span=50).mean()
 
 
 
-    # Простая логика
+    last = df.iloc[-1]
 
-    if price % 2 > 1:
 
-        direction = "📈 ЛОНГ"
 
-        reason = "Покупатели активнее, есть вероятность роста"
+    if last["ema20"] > last["ema50"]:
+
+        direction = "🟢 ЛОНГ"
+
+        reason = "Тренд вверх (EMA20 выше EMA50)"
 
     else:
 
-        direction = "📉 ШОРТ"
+        direction = "🔴 ШОРТ"
 
-        reason = "Продавцы давят, возможна коррекция"
+        reason = "Тренд вниз (EMA20 ниже EMA50)"
+
+
+
+    price = last["close"]
 
 
 
@@ -77,33 +97,29 @@ def analyze(symbol):
 
 
 
-# === График (имитация ликвидаций) ===
+# === График ===
 
-def create_plot(price):
+def create_chart(df):
 
-    levels = [price * 0.97, price * 0.99, price, price * 1.01, price * 1.03]
+    mpf.plot(
 
-    volumes = [10, 50, 20, 60, 15]
+        df,
 
+        type='candle',
 
+        mav=(20,50),
 
-    plt.figure()
+        volume=True,
 
-    plt.bar(levels, volumes)
+        savefig='chart.png'
 
-
-
-    plt.title("Liquidity Heatmap (пример)")
-
-    plt.savefig("plot.png")
-
-    plt.close()
+    )
 
 
 
 
 
-# === Обработка текста ===
+# === Обработка сообщений ===
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -111,95 +127,77 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
-    result = analyze(symbol)
+    try:
+
+        df = get_klines(symbol)
 
 
 
-    if result is None:
-
-        await update.message.reply_text("❌ Монета не найдена, попробуй BTC или ETH")
-
-        return
+        price, direction, reason = analyze(df)
 
 
 
-    price, direction, reason = result
+        entry = round(price, 2)
+
+        stop = round(price * 0.98, 2)
 
 
 
-    entry = price
+        tp1 = round(price * 1.01, 2)
 
-    stop = round(price * 0.98, 2)
+        tp2 = round(price * 1.02, 2)
 
-
-
-    tp1 = round(price * 1.01, 2)
-
-    tp2 = round(price * 1.02, 2)
-
-    tp3 = round(price * 1.03, 2)
+        tp3 = round(price * 1.03, 2)
 
 
 
-    text = f"""
+        text = f"""
 
 📊 {symbol}/USDT
 
-
+📌 {direction}
 
 💰 Цена: {price}
-
-
-
-📌 Направление: {direction}
-
-
 
 📍 Вход: {entry}
 
 🛑 Стоп: {stop}
 
-
-
 🎯 Тейки:
 
-1️⃣ {tp1}
+• 50% → {tp1}
 
-2️⃣ {tp2}
+• 30% → {tp2}
 
-3️⃣ {tp3}
-
-
-
+• 20% → {tp3}
 🧠 Почему:
-
 {reason}
-
-
-
-⚠️ Риск: не более 1-2% от депозита
-
-
-
+⚠️ Риск: 1-2% от депозита
 —————————————
 
 • Оценивайте свои финансовые возможности и риски
 
-    """
+        """
 
 
 
-    await update.message.reply_text(text)
+        await update.message.reply_text(text)
 
 
 
-    create_plot(price)
+        create_chart(df)
 
 
 
-    with open("plot.png", "rb") as img:
+        with open("chart.png", "rb") as img:
 
-        await update.message.reply_photo(img)
+            await update.message.reply_photo(img)
+
+
+
+    except:
+
+        await update.message.reply_text("❌ Монета не найдена (пример: BTC, ETH, SOL)")
 
 
 
@@ -207,11 +205,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 app = ApplicationBuilder().token(TOKEN).build()
 
-
-
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+app.add_handler(MessageHandler(filters.TEXT, handle_message))
 
 
 
 app.run_polling()
+
+
+
 print("BOT RUNNING...)
