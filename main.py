@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
 
-TOKEN = "8773850466:AAF0ZYcuNusn9R8TzyxQRCZoY2Nz2pg6MiA"
+TOKEN = "ТВОЙ_ТОКЕН"
 
 
 # === Поиск символа ===
@@ -29,7 +29,7 @@ def find_symbol(user_input):
     return None
 
 
-# === Получение свечей ===
+# === Свечи ===
 def get_klines(symbol):
     url = f"https://api.binance.com/api/v3/klines?symbol={symbol}USDT&interval=15m&limit=100"
     res = requests.get(url).json()
@@ -59,10 +59,10 @@ def analyze(df):
 
     if last["ema20"] > last["ema50"]:
         direction = "📈 ЛОНГ"
-        reason = "Тренд вверх (EMA20 выше EMA50)"
+        reason = "Восходящий тренд (EMA20 > EMA50)"
     else:
         direction = "📉 ШОРТ"
-        reason = "Тренд вниз (EMA20 ниже EMA50)"
+        reason = "Нисходящий тренд (EMA20 < EMA50)"
 
     return price, direction, reason
 
@@ -85,69 +85,40 @@ def calculate_levels(df, price, direction):
     return stop, tp1, tp2, tp3
 
 
-# === График ===
+# === КРАСИВЫЙ ГРАФИК БЕЗ mplfinance ===
 def create_chart(df):
     try:
         plt.figure(figsize=(10,5))
-        plt.plot(df["close"])
-        plt.title("Price Chart")
 
-        plt.savefig("chart.png")
-        plt.close()
-        return True
+        # свечи (упрощённые)
+        for i in range(len(df)):
+            open_price = df["open"].iloc[i]
+            close_price = df["close"].iloc[i]
+            high = df["high"].iloc[i]
+            low = df["low"].iloc[i]
 
-    except Exception as e:
-        print("CHART ERROR:", e)
-        return False
+            color = 'green' if close_price > open_price else 'red'
 
+            # тело свечи
+            plt.plot([i, i], [low, high], color=color)
+            plt.plot([i, i], [open_price, close_price], linewidth=4, color=color)
 
-# === Обработка ===
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_input = update.message.text.upper()
-    symbol = find_symbol(user_input)
+        # EMA линии
+        plt.plot(df["close"].ewm(span=20).mean(), linewidth=1)
+        plt.plot(df["close"].ewm(span=50).mean(), linewidth=1)
 
-    if symbol is None:
-        await update.message.reply_text("❌ Монета не найдена")
-        return
-
-    df = get_klines(symbol)
-
-    if df is None or df.empty:
-        await update.message.reply_text("❌ Монета не найдена")
-        return
-
-    try:
-        price, direction, reason = analyze(df)
-        stop, tp1, tp2, tp3 = calculate_levels(df, price, direction)
-
-        # 📊 график
-        create_chart(df)
-        try:
-            with open("chart.png", "rb") as img:
-                await update.message.reply_photo(img)
-        except Exception as e:
-            print("SEND ERROR:", e)
-
-        # 📩 текст
-        text = f"""
-📊 {symbol}/USDT
-
-📌 {direction}
-
-💰 Цена: {round(price, 4)}
-
-📍 Вход: {round(price, 4)}
-🛑 Стоп: {round(stop, 4)}
-
-🎯 Тейки:
-• 50% → {round(tp1, 4)}
-• 30% → {round(tp2, 4)}
-• 20% → {round(tp3, 4)}
+        plt.title("Market Structure")
+        plt.grid(False)
+• TP1: {round(tp1, 4)}
+• TP2: {round(tp2, 4)}
+• TP3: {round(tp3, 4)}
 
 🧠 Почему:
 {reason}
 
-⚠️ Риск: 1-2%
+📊 Таймфрейм: 15m
+
+⚠️ Риск: 1-2% от депозита
 
 —————————————
 • Оценивайте свои финансовые возможности и риски
