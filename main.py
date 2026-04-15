@@ -117,31 +117,30 @@ def analyze(df):
 # === График ===
 
 def create_chart(df):
+    mc = mpf.make_marketcolors(
+        up='green',
+        down='red',
+        wick='inherit',
+        edge='inherit'
+    )
 
-    try:
+    style = mpf.make_mpf_style(
+        base_mpf_style='nightclouds',
+        marketcolors=mc,
+        gridstyle='',
+        facecolor='#0f172a'
+    )
 
-        mpf.plot(
-
-            df,
-
-            type='candle',
-
-            mav=(20,50),
-
-            volume=True,
-
-            savefig='chart.png'
-
-        )
-
-        return True
-
-    except:
-
-        return False
-
-
-
+    mpf.plot(
+        df,
+        type='candle',
+        mav=(20,50),
+        volume=True,
+        style=style,
+        figsize=(10,6),
+        tight_layout=True,
+        savefig='chart.png'
+    )
 
 
 # === Обработка сообщений ===
@@ -176,20 +175,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 📊 {symbol}/USDT
 
-
-
 📌 {direction}
 
-
-
 💰 Цена: {round(price, 4)}
-
-
 
 📍 Вход: {round(price, 4)}
 
 🛑 Стоп: {round(stop, 4)}
-
 
 
 🎯 Тейки:
@@ -200,17 +192,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 • 20% → {round(tp3, 4)}
 
-
-
 🧠 Почему:
 
 {reason}
 
-
-
 ⚠️ Риск: 1-2% от депозита
-
-
 
 —————————————
 
