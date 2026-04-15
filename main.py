@@ -1,3 +1,5 @@
+import matplotlib
+matplotlib.use('Agg')
 import requests
 
 import pandas as pd
@@ -117,30 +119,23 @@ def analyze(df):
 # === График ===
 
 def create_chart(df):
-    mc = mpf.make_marketcolors(
-        up='green',
-        down='red',
-        wick='inherit',
-        edge='inherit'
-    )
+    try:
+        import mplfinance as mpf
 
-    style = mpf.make_mpf_style(
-        base_mpf_style='nightclouds',
-        marketcolors=mc,
-        gridstyle='',
-        facecolor='#0f172a'
-    )
+        mpf.plot(
+            df,
+            type='candle',
+            mav=(20,50),
+            volume=True,
+            style='yahoo',
+            savefig='chart.png'
+        )
 
-    mpf.plot(
-        df,
-        type='candle',
-        mav=(20,50),
-        volume=True,
-        style=style,
-        figsize=(10,6),
-        tight_layout=True,
-        savefig='chart.png'
-    )
+        return True
+
+    except Exception as e:
+        print("CHART ERROR:", e)
+        return False
 
 
 # === Обработка сообщений ===
@@ -158,9 +153,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         price, direction, stop, tp1, tp2, tp3, reason = analyze(df)
 
         # 📊 график сначала
-        if create_chart(df):
-            with open("chart.png", "rb") as img:
-                await update.message.reply_photo(img)
+        create_chart(df)
+
+try:
+    with open("chart.png", "rb") as img:
+        await update.message.reply_photo(img)
+except Exception as e:
+    print("SEND ERROR:", e)
 
         # 📩 потом текст
         text = f"""
