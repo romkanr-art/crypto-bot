@@ -165,14 +165,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
-    try:
+try:
+    price, direction, stop, tp1, tp2, tp3, reason = analyze(df)
 
-        price, direction, stop, tp1, tp2, tp3, reason = analyze(df)
-
-
-
-        text = f"""
-
+    text = f"""
 📊 {symbol}/USDT
 
 📌 {direction}
@@ -180,49 +176,34 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 💰 Цена: {round(price, 4)}
 
 📍 Вход: {round(price, 4)}
-
 🛑 Стоп: {round(stop, 4)}
 
-
 🎯 Тейки:
-
 • 50% → {round(tp1, 4)}
-
 • 30% → {round(tp2, 4)}
-
 • 20% → {round(tp3, 4)}
 
 🧠 Почему:
-
 {reason}
 
 ⚠️ Риск: 1-2% от депозита
 
 —————————————
-
 • Оценивайте свои финансовые возможности и риски
+    """
 
-        """
+    # ✅ сначала график
+    if create_chart(df):
+        with open("chart.png", "rb") as img:
+            await update.message.reply_photo(img)
 
+    # ✅ потом текст
+    await update.message.reply_text(text)
 
+except Exception as e:
+    print(e)  # чтобы видеть ошибку в логах
+    await update.message.reply_text("⚠️ Ошибка анализа")
 
-        await update.message.reply_text(text)
-
-
-
-        # график
-
-        if create_chart(df):
-
-            with open("chart.png", "rb") as img:
-
-                await update.message.reply_photo(img, caption=f"{symbol}/USDT")
-                
-await update.message.reply_text(text)
-
-    except Exception as e:
-
-        await update.message.reply_text("⚠️ Ошибка анализа")
 
 
 
