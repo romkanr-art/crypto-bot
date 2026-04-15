@@ -1,4 +1,3 @@
-print("BOT STARTING..."
 import requests
 
 import pandas as pd
@@ -210,7 +209,3 @@ app.add_handler(MessageHandler(filters.TEXT, handle_message))
 
 
 app.run_polling()
-
-
-
-print("BOT RUNNING...)
