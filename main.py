@@ -198,7 +198,7 @@ try:
 
 
     # ✅ потом текст
-    await update.message.reply_text(text)
+await update.message.reply_text(text)
 
 except Exception as e:
     print(e)  # чтобы видеть ошибку в логах
