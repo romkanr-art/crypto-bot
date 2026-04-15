@@ -82,7 +82,7 @@ def get_klines(symbol):
 # === Анализ ===
 
 def calculate_levels(df,price,direction):rolling(14).mean().iloc[-1]
-    atr = (df["hight"] - df["low"]).
+    atr = (df["hight"] - df["low"]).rolling(14).mean().iloc[-1]
 
 
     if direction == "📈 ЛОНГ"
