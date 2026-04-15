@@ -81,33 +81,22 @@ def get_klines(symbol):
 
 # === Анализ ===
 
-def calculate_levels(df,price,direction):rolling(14).mean().iloc[-1]
-    atr = (df["hight"] - df["low"]).rolling(14).mean().iloc[-1]
+def calculate_levels(df, price, direction):
+    atr = (df["high"] - df["low"]).rolling(14).mean().iloc[-1]
 
-
-    if direction == "📈 ЛОНГ"
-
+    if direction == "📈 ЛОНГ":
         stop = price - atr * 1.5
-
         tp1 = price + atr * 1
-
         tp2 = price + atr * 2
-
         tp3 = price + atr * 3
-
     else:
-
-        direction = "📉 ШОРТ"
-
         stop = price + atr * 1.5
-
         tp1 = price - atr * 1
-
         tp2 = price - atr * 2
-
         tp3 = price - atr * 3
 
-        reason = "Тренд вниз (EMA20 ниже EMA50)"
+    return stop, tp1, tp2, tp3
+
 
 
 
