@@ -216,7 +216,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             with open("chart.png", "rb") as img:
 
-                await update.message.reply_photo(img),caption = f"{symbol}/USDT")
+                await update.message.reply_photo(img),caption=f"{symbol}/USDT"
 
 await update.message.reply_text(text)
 
