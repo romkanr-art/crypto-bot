@@ -18,7 +18,24 @@ TOKEN = "8773850466:AAF0ZYcuNusn9R8TzyxQRCZoY2Nz2pg6MiA"
 
 
 
+def find_symbol(user_input):
+    url = "https://api.binance.com/api/v3/exchangeInfo"
+    data = requests.get(url).json()
 
+    symbols = [s["symbol"] for s in data["symbols"]]
+
+    user_input = user_input.upper()
+
+    # прямое совпадение
+    if user_input + "USDT" in symbols:
+        return user_input
+
+    # поиск похожего
+    for s in symbols:
+        if user_input in s:
+            return s.replace("USDT", "")
+
+    return None
 
 # === Получение свечей с проверкой ===
 
@@ -64,74 +81,55 @@ def get_klines(symbol):
 
 # === Анализ ===
 
-def analyze(df):
-
-    df["ema20"] = df["close"].ewm(span=20).mean()
-
-    df["ema50"] = df["close"].ewm(span=50).mean()
+def calculate_levels(df,price,direction):rolling(14).mean().iloc[-1]
+    atr = (df["hight"] - df["low"]).
 
 
+    if direction == "📈 ЛОНГ"
 
-    last = df.iloc[-1]
+        stop = price - atr * 1.5
 
+        tp1 = price + atr * 1
 
+        tp2 = price + atr * 2
 
-    price = float(last["close"])
-
-
-
-    if last["ema20"] > last["ema50"]:
-
-        direction = "📈 ЛОНГ"
-
-        stop = price * 0.98
-
-        tp1 = price * 1.01
-
-        tp2 = price * 1.02
-
-        tp3 = price * 1.03
-
-        reason = "Тренд вверх (EMA20 выше EMA50)"
+        tp3 = price + atr * 3
 
     else:
 
         direction = "📉 ШОРТ"
 
-        stop = price * 1.02
+        stop = price + atr * 1.5
 
-        tp1 = price * 0.99
+        tp1 = price - atr * 1
 
-        tp2 = price * 0.98
+        tp2 = price - atr * 2
 
-        tp3 = price * 0.97
+        tp3 = price - atr * 3
 
         reason = "Тренд вниз (EMA20 ниже EMA50)"
 
 
 
-    return price, direction, stop, tp1, tp2, tp3, reason
+    return price, direction, reason = analyze(df)
+    stop, tp1, tp2, tp3 = calculate_levels(df,price,direction)
 
 
 
 
 
 # === График ===
-
+import matplotlib.pyplot as plt
 def create_chart(df):
     try:
-        import mplfinance as mpf
+        plt.figure(figsize=(10,5))
+        plt.plot(df["close"])
+        plt.title("Price Chart")
 
-        mpf.plot(
-            df,
-            type='candle',
-            mav=(20,50),
-            volume=True,
-            style='yahoo',
-            savefig='chart.png'
-        )
-
+        plt.savefig("chart.png")
+        plt.close()
         return True
+
 
     except Exception as e:
         print("CHART ERROR:", e)
@@ -141,7 +139,11 @@ def create_chart(df):
 # === Обработка сообщений ===
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    symbol = update.message.text.upper()
+    user_input = update.message.text.upper()
+    symbol = find_symbol(user_input)
+    if symbol is None:
+        await update.message.reply_text("❌ Монета не найдена")
+        return
 
     df = get_klines(symbol)
 
