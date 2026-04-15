@@ -146,33 +146,24 @@ def create_chart(df):
 # === Обработка сообщений ===
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     symbol = update.message.text.upper()
-
-
 
     df = get_klines(symbol)
 
-
-
-    # ❗ если монеты нет
-
     if df is None or df.empty:
-
-        await update.message.reply_text("❌ Монета не найдена (пример: BTC, ETH, SOL)")
-
+        await update.message.reply_text("❌ Монета не найдена")
         return
 
+    try:
+        price, direction, stop, tp1, tp2, tp3, reason = analyze(df)
 
+        # 📊 график сначала
+        if create_chart(df):
+            with open("chart.png", "rb") as img:
+                await update.message.reply_photo(img)
 
-try:
-    price, direction, stop, tp1, tp2, tp3, reason = analyze(df)
-# ✅ сначала график
-    if create_chart(df):
-        with open("chart.png", "rb") as img:
-            await update.message.reply_photo(img)
-            
-    text = f"""
+        # 📩 потом текст
+        text = f"""
 📊 {symbol}/USDT
 
 📌 {direction}
@@ -190,19 +181,17 @@ try:
 🧠 Почему:
 {reason}
 
-⚠️ Риск: 1-2% от депозита
+⚠️ Риск: 1-2%
 
 —————————————
 • Оценивайте свои финансовые возможности и риски
-    """
+        """
 
+    await update.message.reply_text(text)
 
-    # ✅ потом текст
-await update.message.reply_text(text)
-
-except Exception as e:
-    print(e)  # чтобы видеть ошибку в логах
-    await update.message.reply_text("⚠️ Ошибка анализа")
+    except Exception as e:
+        print("ERROR:", e)
+        await update.message.reply_text("⚠️ Ошибка анализа")
 
 
 
