@@ -58,10 +58,10 @@ def analyze(df):
     price = float(last["close"])
 
     if last["ema20"] > last["ema50"]:
-        direction = "📈 ЛОНГ"
+        direction = "🟢 ЛОНГ"
         reason = "Восходящий тренд (EMA20 > EMA50)"
     else:
-        direction = "📉 ШОРТ"
+        direction = "🔴 ШОРТ"
         reason = "Нисходящий тренд (EMA20 < EMA50)"
 
     return price, direction, reason
