@@ -89,40 +89,41 @@ def analyze_market_state(df, df_h):
 Не входить
 """
 
+
+📌 Сценарий:
+Не входить
+"""
+
     if structure == "UPTREND":
         return "ЛОНГ", f"""
-Восходящий тренд
-
-Ликвидность:
+💧 Ликвидность:
 Сверху: {round(liquidity_high,4)}
 Снизу: {round(liquidity_low,4)}
 
-Сценарий:
-Ждать откат для входа
+📌 Сценарий:
+Ищем вход в лонг на откате
 """
 
     if structure == "DOWNTREND":
         return "ШОРТ", f"""
-Нисходящий тренд
-
-Ликвидность:
+💧 Ликвидность:
 Сверху: {round(liquidity_high,4)}
 Снизу: {round(liquidity_low,4)}
 
-Сценарий:
-Ждать откат
+📌 Сценарий:
+Ищем вход в шорт на откате
 """
+
 
     return "ФЛЭТ", f"""
-Флэт
-
-Ликвидность:
+💧 Ликвидность:
 Сверху: {round(liquidity_high,4)}
 Снизу: {round(liquidity_low,4)}
 
-Действие:
+📌 Сценарий:
 Не входить
 """
+
 
 
 # === СДЕЛКА ВСЕГДА ===
@@ -208,30 +209,32 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     trend = get_trend(df)
     trade = build_trade(df, trend)
 
-    text = f"""
-{symbol}/USDT
+    rend_emoji = "📈" if trend_state == "ЛОНГ" else "📉" if trend_state == "ШОРТ" else "⚖️"
 
-Рынок: {trend_state}
-
-{comment}
-"""
-
+    text = f"{symbol}/USDT\n\n"
+    text += f"{trend_emoji} Рынок: {trend_state}\n\n"
+    text += f"{comment.strip()}\n"
     if trade:
         entry, stop, tp1, tp2, tp3 = trade
 
-        text += f"""
+       entry_type = "Сейчас" if abs(df["close"].iloc[-1] - entry) < (entry * 0.002) else "Лимитный"
 
-Рекомендуемый вход:
+    text += f"""
 
-Направление: {"ЛОНГ" if trend == "LONG" else "ШОРТ"}
+    💰 Рекомендуемый вход:
+    Направление: {"📈 ЛОНГ" if trend == "LONG" else "📉 ШОРТ"}
+    Тип входа: {entry_type}
 
-Вход: {round(entry,4)}
-Стоп: {round(stop,4)}
+    Вход: {round(entry,4)}
+    Стоп: {round(stop,4)}
 
-TP1: {round(tp1,4)}
-TP2: {round(tp2,4)}
-TP3: {round(tp3,4)}
-"""
+    🎯 Цели:
+    TP1: {round(tp1,4)}
+    TP2: {round(tp2,4)}
+    TP3: {round(tp3,4)}
+    
+    ⚠️ Оценивайте свои финансовые возможности и риски
+    """
 
     await update.message.reply_text(text)
 
