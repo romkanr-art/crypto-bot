@@ -3,16 +3,17 @@
 import requests
 import pandas as pd
 import asyncio
+
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
 
 TOKEN = "8773850466:AAF0ZYcuNusn9R8TzyxQRCZoY2Nz2pg6MiA"
-ALLOWED_CHAT_ID = -1003130189488  # ID группы
+ALLOWED_CHAT_ID = -1003130189488
 
 SYMBOLS = ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA"]
 
 
-# ===================== DATA =====================
+# ================= DATA =================
 def get_klines(symbol, interval="15m"):
     try:
         url = f"https://api.binance.com/api/v3/klines?symbol={symbol}USDT&interval={interval}&limit=150"
@@ -33,7 +34,7 @@ def get_klines(symbol, interval="15m"):
         return None
 
 
-# ===================== INDICATORS =====================
+# ================= INDICATORS =================
 def add_indicators(df):
     df["ema20"] = df["close"].ewm(span=20).mean()
     df["ema50"] = df["close"].ewm(span=50).mean()
@@ -47,19 +48,7 @@ def get_trend(df):
     return "LONG" if last["ema20"] > last["ema50"] else "SHORT"
 
 
-# ===================== STRUCTURE =====================
-def get_structure(df):
-    highs = df["high"].rolling(5).max()
-    lows = df["low"].rolling(5).min()
-
-    if highs.iloc[-1] > highs.iloc[-5] and lows.iloc[-1] > lows.iloc[-5]:
-        return "UP"
-    if highs.iloc[-1] < highs.iloc[-5] and lows.iloc[-1] < lows.iloc[-5]:
-        return "DOWN"
-    return "FLAT"
-
-
-# ===================== ORDER BLOCK =====================
+# ================= ZONE =================
 def get_zone(df, trend):
     candles = df.tail(12)
 
@@ -75,35 +64,34 @@ def get_zone(df, trend):
     return None
 
 
-# ===================== ANALYSIS =====================
+# ================= ANALYSIS =================
 def analyze(df, df_h):
     df = add_indicators(df)
     df_h = add_indicators(df_h)
 
     trend = get_trend(df)
     higher = get_trend(df_h)
-    structure = get_structure(df)
 
     high_liq = df["high"].rolling(30).max().iloc[-1]
     low_liq = df["low"].rolling(30).min().iloc[-1]
-
-    zone = get_zone(df, trend)
 
     state = "⚖️ ФЛЭТ"
     scenario = "Не входить"
 
     if trend == higher:
-        if structure == "UP":
+        if trend == "LONG":
             state = "📈 ЛОНГ"
-            scenario = "Ищем вход в лонг от отката"
-        elif structure == "DOWN":
+            scenario = "Ищем вход в лонг на откате"
+        else:
             state = "📉 ШОРТ"
-            scenario = "Ищем вход в шорт от отката"
+            scenario = "Ищем вход в шорт на откате"
 
-    return state, scenario, high_liq, low_liq, zone, trend
+    zone = get_zone(df, trend)
+
+    return state, scenario, high_liq, low_liq, zone, trend, df
 
 
-# ===================== TRADE =====================
+# ================= TRADE =================
 def build_trade(df, trend, zone):
     if not zone:
         return None
@@ -127,17 +115,7 @@ def build_trade(df, trend, zone):
     return entry, stop, tp1, tp2, tp3
 
 
-# ===================== ENTRY DECISION =====================
-def entry_decision(df, entry):
-    price = df["close"].iloc[-1]
-
-    if abs(price - entry) < entry * 0.002:
-        return "МОЖНО ВХОДИТЬ"
-    else:
-        return "ЖДАТЬ ПОДХОДА"
-
-
-# ===================== SIGNAL FILTER =====================
+# ================= SIGNAL =================
 def strong_signal(df):
     last = df.iloc[-1]
 
@@ -152,7 +130,9 @@ def strong_signal(df):
         return None
 
     return trend
-    # ===================== MESSAGE =====================
+
+
+# ================= USER =================
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if update.effective_chat.id != ALLOWED_CHAT_ID:
@@ -167,10 +147,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Монета не найдена")
         return
 
-    state, scenario, high_liq, low_liq, zone, trend = analyze(df, df_h)
+    state, scenario, high_liq, low_liq, zone, trend, df = analyze(df, df_h)
 
     text = f"{symbol}/USDT\n\n{state}\n\n"
-
     text += f"💧 Ликвидность:\nСверху: {round(high_liq,4)}\nСнизу: {round(low_liq,4)}\n\n"
     text += f"📌 Сценарий:\n{scenario}\n\n"
 
@@ -182,12 +161,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if trade:
         entry, stop, tp1, tp2, tp3 = trade
-        decision = entry_decision(df, entry)
+        price = df["close"].iloc[-1]
 
-        text += f"⚡ Сейчас: {decision}\n\n"
+        decision = "МОЖНО ВХОДИТЬ" if abs(price - entry) < entry * 0.002 else "ЖДАТЬ"
 
-        text += f"""💰 Сделка:
-Направление: {"📈 ЛОНГ" if trend=="LONG" else "📉 ШОРТ"}
+        text += f"""⚡ Сейчас: {decision}
+
+💰 Сделка:
+{"📈 ЛОНГ" if trend=="LONG" else "📉 ШОРТ"}
 
 Вход: {round(entry,4)}
 Стоп: {round(stop,4)}
@@ -203,7 +184,7 @@ TP3: {round(tp3,4)}
     await update.message.reply_text(text)
 
 
-# ===================== AUTO SIGNAL =====================
+# ================= AUTO =================
 async def scan_market(app):
     while True:
         for symbol in SYMBOLS:
@@ -248,16 +229,16 @@ TP3: {round(tp3,4)}
         await asyncio.sleep(600)
 
 
-# ===================== START =====================
-async def main():
-    app = ApplicationBuilder().token(TOKEN).build()
+# ================= START =================
+app = ApplicationBuilder().token(TOKEN).build()
 
-    app.add_handler(MessageHandler(filters.TEXT, handle_message))
+app.add_handler(MessageHandler(filters.TEXT, handle_message))
 
+
+async def on_start(app):
     asyncio.create_task(scan_market(app))
 
-    await app.run_polling()
 
+app.post_init = on_start
 
-if __name__ == "__main__":
-    asyncio.run(main())
+app.run_polling()
