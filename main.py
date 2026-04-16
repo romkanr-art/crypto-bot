@@ -10,6 +10,7 @@ from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTyp
 
 TOKEN = "8773850466:AAF0ZYcuNusn9R8TzyxQRCZoY2Nz2pg6MiA"
 
+print(update.effective_chat.id)
 
 # === Поиск символа ===
 def find_symbol(user_input):
