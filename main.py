@@ -3,59 +3,65 @@
 import requests
 import pandas as pd
 import asyncio
-
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
 
 TOKEN = "8773850466:AAF0ZYcuNusn9R8TzyxQRCZoY2Nz2pg6MiA"
-ALLOWED_CHAT_ID = -1003130189488
+ALLOWED_CHAT_ID = -1003130189488  # ID группы
 
 SYMBOLS = ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA"]
 
 
-# === DATA ===
+# ===================== DATA =====================
 def get_klines(symbol, interval="15m"):
-    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}USDT&interval={interval}&limit=100"
-    res = requests.get(url).json()
+    try:
+        url = f"https://api.binance.com/api/v3/klines?symbol={symbol}USDT&interval={interval}&limit=150"
+        res = requests.get(url, timeout=10).json()
 
-    if isinstance(res, dict):
+        if isinstance(res, dict):
+            return None
+
+        df = pd.DataFrame(res)[[0,1,2,3,4,5]]
+        df.columns = ["time","open","high","low","close","volume"]
+        df = df.astype(float)
+
+        df["time"] = pd.to_datetime(df["time"], unit='ms')
+        df.set_index("time", inplace=True)
+
+        return df
+    except:
         return None
 
-    df = pd.DataFrame(res)[[0,1,2,3,4,5]]
-    df.columns = ["time","open","high","low","close","volume"]
-    df = df.astype(float)
 
-    df["time"] = pd.to_datetime(df["time"], unit='ms')
-    df.set_index("time", inplace=True)
-
+# ===================== INDICATORS =====================
+def add_indicators(df):
+    df["ema20"] = df["close"].ewm(span=20).mean()
+    df["ema50"] = df["close"].ewm(span=50).mean()
+    df["atr"] = (df["high"] - df["low"]).rolling(14).mean()
+    df["vol_ma"] = df["volume"].rolling(20).mean()
     return df
 
 
-# === TREND ===
 def get_trend(df):
-    df["ema20"] = df["close"].ewm(span=20).mean()
-    df["ema50"] = df["close"].ewm(span=50).mean()
     last = df.iloc[-1]
     return "LONG" if last["ema20"] > last["ema50"] else "SHORT"
 
 
-# === STRUCTURE ===
-def get_market_structure(df):
+# ===================== STRUCTURE =====================
+def get_structure(df):
     highs = df["high"].rolling(5).max()
     lows = df["low"].rolling(5).min()
 
     if highs.iloc[-1] > highs.iloc[-5] and lows.iloc[-1] > lows.iloc[-5]:
-        return "UPTREND"
-
+        return "UP"
     if highs.iloc[-1] < highs.iloc[-5] and lows.iloc[-1] < lows.iloc[-5]:
-        return "DOWNTREND"
+        return "DOWN"
+    return "FLAT"
 
-    return "RANGE"
 
-
-# === ORDER BLOCK ===
-def get_order_block(df, trend):
-    candles = df.tail(10)
+# ===================== ORDER BLOCK =====================
+def get_zone(df, trend):
+    candles = df.tail(12)
 
     for i in range(len(candles)-1, -1, -1):
         c = candles.iloc[i]
@@ -69,156 +75,119 @@ def get_order_block(df, trend):
     return None
 
 
-# === АНАЛИЗ ===
-def analyze_market_state(df, df_h):
+# ===================== ANALYSIS =====================
+def analyze(df, df_h):
+    df = add_indicators(df)
+    df_h = add_indicators(df_h)
+
     trend = get_trend(df)
-    higher_trend = get_trend(df_h)
-    structure = get_market_structure(df)
+    higher = get_trend(df_h)
+    structure = get_structure(df)
 
-    liquidity_high = df["high"].rolling(20).max().iloc[-1]
-    liquidity_low = df["low"].rolling(20).min().iloc[-1]
+    high_liq = df["high"].rolling(30).max().iloc[-1]
+    low_liq = df["low"].rolling(30).min().iloc[-1]
 
-    if trend != higher_trend:
-        return "ФЛЭТ", f"""
-Против старшего тренда
+    zone = get_zone(df, trend)
 
-Сценарий:
-Движение по {higher_trend}
+    state = "⚖️ ФЛЭТ"
+    scenario = "Не входить"
 
-Действие:
-Не входить
-"""
+    if trend == higher:
+        if structure == "UP":
+            state = "📈 ЛОНГ"
+            scenario = "Ищем вход в лонг от отката"
+        elif structure == "DOWN":
+            state = "📉 ШОРТ"
+            scenario = "Ищем вход в шорт от отката"
 
-    if structure == "UPTREND":
-        return "ЛОНГ", f"""
-💧 Ликвидность:
-Сверху: {round(liquidity_high,4)}
-Снизу: {round(liquidity_low,4)}
-
-📌 Сценарий:
-Ищем вход в лонг на откате
-"""
-
-    if structure == "DOWNTREND":
-        return "ШОРТ", f"""
-Нисходящий тренд
-
-💧 Ликвидность:
-Сверху: {round(liquidity_high,4)}
-Снизу: {round(liquidity_low,4)}
-
-📌 Сценарий:
-Ищем вход в шорт на откате
-"""
-        return "ФЛЭТ", f"""
-💧 Ликвидность:
-Сверху: {round(liquidity_high,4)}
-Снизу: {round(liquidity_low,4)}
-
-📌 Сценарий:
-Не входить
-"""
+    return state, scenario, high_liq, low_liq, zone, trend
 
 
-# === СДЕЛКА ВСЕГДА ===
-def build_trade(df, trend):
-    ob = get_order_block(df, trend)
-    if not ob:
+# ===================== TRADE =====================
+def build_trade(df, trend, zone):
+    if not zone:
         return None
 
-    ob_low, ob_high = ob
-    atr = (df["high"] - df["low"]).rolling(14).mean().iloc[-1]
+    low, high = zone
+    atr = df["atr"].iloc[-1]
 
     if trend == "LONG":
-        entry = ob_low + (ob_high - ob_low) * 0.3
-        stop = ob_low - atr
+        entry = low + (high - low) * 0.4
+        stop = low - atr * 1.5
         tp1 = entry + atr * 2
         tp2 = entry + atr * 3
-        tp3 = entry + atr * 4
+        tp3 = entry + atr * 5
     else:
-        entry = ob_high - (ob_high - ob_low) * 0.3
-        stop = ob_high + atr
+        entry = high - (high - low) * 0.4
+        stop = high + atr * 1.5
         tp1 = entry - atr * 2
         tp2 = entry - atr * 3
-        tp3 = entry - atr * 4
+        tp3 = entry - atr * 5
 
     return entry, stop, tp1, tp2, tp3
 
 
-# === СИЛЬНЫЙ СИГНАЛ ===
-def analyze_signal(df):
-    df["ema20"] = df["close"].ewm(span=20).mean()
-    df["ema50"] = df["close"].ewm(span=50).mean()
+# ===================== ENTRY DECISION =====================
+def entry_decision(df, entry):
+    price = df["close"].iloc[-1]
 
-    df["tr"] = df["high"] - df["low"]
-    df["atr"] = df["tr"].rolling(14).mean()
+    if abs(price - entry) < entry * 0.002:
+        return "МОЖНО ВХОДИТЬ"
+    else:
+        return "ЖДАТЬ ПОДХОДА"
 
-    df["+dm"] = df["high"].diff().clip(lower=0)
-    df["-dm"] = -df["low"].diff().clip(upper=0)
 
-    df["+di"] = 100 * (df["+dm"].rolling(14).mean() / df["atr"])
-    df["-di"] = 100 * (df["-dm"].rolling(14).mean() / df["atr"])
-
-    df["dx"] = (abs(df["+di"] - df["-di"]) / (df["+di"] + df["-di"])) * 100
-    df["adx"] = df["dx"].rolling(14).mean()
-
-    df["vol_ma"] = df["volume"].rolling(20).mean()
-
+# ===================== SIGNAL FILTER =====================
+def strong_signal(df):
     last = df.iloc[-1]
 
-    if last["adx"] < 20:
+    if last["volume"] < last["vol_ma"] * 1.5:
         return None
 
     trend = "LONG" if last["ema20"] > last["ema50"] else "SHORT"
 
-    if trend == "LONG" and last["close"] <= last["open"]:
+    if trend == "LONG" and last["close"] < last["open"]:
         return None
-
-    if trend == "SHORT" and last["close"] >= last["open"]:
-        return None
-
-    if last["volume"] < last["vol_ma"] * 1.3:
+    if trend == "SHORT" and last["close"] > last["open"]:
         return None
 
     return trend
-
-
-# === HANDLE ===
+    # ===================== MESSAGE =====================
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if update.effective_chat.id != ALLOWED_CHAT_ID:
         return
 
-    symbol = update.message.text.upper()
+    symbol = update.message.text.upper().replace("/USDT","").strip()
 
     df = get_klines(symbol)
     df_h = get_klines(symbol, "1h")
 
     if df is None or df_h is None:
-        await update.message.reply_text("Монета не найдена")
+        await update.message.reply_text("❌ Монета не найдена")
         return
 
-    trend_state, comment = analyze_market_state(df, df_h)
+    state, scenario, high_liq, low_liq, zone, trend = analyze(df, df_h)
 
-    trend = get_trend(df)
-    trade = build_trade(df, trend)
-    text = f"{symbol}/USDT\n\n"
-    
-    trend_emoji = "📈" if trend_state == "ЛОНГ" else "📉" if trend_state == "ШОРТ" else "⚖️"
+    text = f"{symbol}/USDT\n\n{state}\n\n"
 
-text += f"{trend_emoji} Рынок: {trend_state}\n\n"
-text += f"{comment.strip()}\n"
+    text += f"💧 Ликвидность:\nСверху: {round(high_liq,4)}\nСнизу: {round(low_liq,4)}\n\n"
+    text += f"📌 Сценарий:\n{scenario}\n\n"
 
-        if trade:
+    if zone:
+        low, high = zone
+        text += f"📍 Зона входа:\n{round(low,4)} - {round(high,4)}\n\n"
+
+    trade = build_trade(df, trend, zone)
+
+    if trade:
         entry, stop, tp1, tp2, tp3 = trade
+        decision = entry_decision(df, entry)
 
-       entry_type = "Сейчас" if abs(df["close"].iloc[-1] - entry) < (entry * 0.002) else "Лимитный"
+        text += f"⚡ Сейчас: {decision}\n\n"
 
-text += f"""
-
-💰 Рекомендуемый вход:
-Направление: {"📈 ЛОНГ" if trend == "LONG" else "📉 ШОРТ"}
-Тип входа: {entry_type}
+        text += f"""💰 Сделка:
+Направление: {"📈 ЛОНГ" if trend=="LONG" else "📉 ШОРТ"}
 
 Вход: {round(entry,4)}
 Стоп: {round(stop,4)}
@@ -228,13 +197,13 @@ TP1: {round(tp1,4)}
 TP2: {round(tp2,4)}
 TP3: {round(tp3,4)}
 
-⚠️ Оценивайте свои финансовые возможности и риски
+⚠️ Оценивайте риски
 """
 
     await update.message.reply_text(text)
 
 
-# === АВТО СИГНАЛЫ ===
+# ===================== AUTO SIGNAL =====================
 async def scan_market(app):
     while True:
         for symbol in SYMBOLS:
@@ -244,23 +213,27 @@ async def scan_market(app):
             if df is None or df_h is None:
                 continue
 
-            signal = analyze_signal(df)
+            df = add_indicators(df)
+            df_h = add_indicators(df_h)
+
+            signal = strong_signal(df)
             if not signal:
                 continue
 
             if signal != get_trend(df_h):
                 continue
 
-            trade = build_trade(df, signal)
+            zone = get_zone(df, signal)
+            trade = build_trade(df, signal, zone)
+
             if not trade:
                 continue
 
             entry, stop, tp1, tp2, tp3 = trade
 
-            text = f"""
-СИГНАЛ {symbol}
+            text = f"""🚨 СИГНАЛ {symbol}
 
-Направление: {"ЛОНГ" if signal == "LONG" else "ШОРТ"}
+{"📈 ЛОНГ" if signal=="LONG" else "📉 ШОРТ"}
 
 Вход: {round(entry,4)}
 Стоп: {round(stop,4)}
@@ -272,19 +245,19 @@ TP3: {round(tp3,4)}
 
             await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, text=text)
 
-        await asyncio.sleep(900)
+        await asyncio.sleep(600)
 
 
-# === START ===
-app = ApplicationBuilder().token(TOKEN).build()
+# ===================== START =====================
+async def main():
+    app = ApplicationBuilder().token(TOKEN).build()
 
-app.add_handler(MessageHandler(filters.TEXT, handle_message))
+    app.add_handler(MessageHandler(filters.TEXT, handle_message))
 
-
-async def on_start(app):
     asyncio.create_task(scan_market(app))
 
+    await app.run_polling()
 
-app.post_init = on_start
 
-app.run_polling()
+if name == "__main__":
+    asyncio.run(main())
