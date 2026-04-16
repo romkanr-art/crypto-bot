@@ -202,10 +202,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     trend = get_trend(df)
     trade = build_trade(df, trend)
-
+    text = f"{symbol}/USDT\n\n"
+    
     trend_emoji = "📈" if trend_state == "ЛОНГ" else "📉" if trend_state == "ШОРТ" else "⚖️"
 
-text = f"{symbol}/USDT\n\n"
 text += f"{trend_emoji} Рынок: {trend_state}\n\n"
 text += f"{comment.strip()}\n"
 
