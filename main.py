@@ -178,7 +178,7 @@ TP1: {round(tp1,4)}
 TP2: {round(tp2,4)}
 TP3: {round(tp3,4)}
 
-⚠️ Оценивайте риски
+⚠️ Оценивайте риски заходите на 1-2% от депозита
 """
 
     await update.message.reply_text(text)
