@@ -10,7 +10,6 @@ from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTyp
 
 TOKEN = "8773850466:AAF0ZYcuNusn9R8TzyxQRCZoY2Nz2pg6MiA"
 
-print(update.effective_chat.id)
 
 # === Поиск символа ===
 def find_symbol(user_input):
@@ -123,6 +122,8 @@ def create_chart(df):
 
 # === Обработка ===
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    awayt update.message.reply_text(f"ID этой группы: {chat_id}")
     user_input = update.message.text.upper()
     symbol = find_symbol(user_input)
 
