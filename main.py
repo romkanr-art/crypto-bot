@@ -91,34 +91,38 @@ def analyze_market_state(df, df_h):
 
     if structure == "UPTREND":
         return "ЛОНГ", f"""
-💧 Ликвидность:
+Восходящий тренд
+
+Ликвидность:
 Сверху: {round(liquidity_high,4)}
 Снизу: {round(liquidity_low,4)}
 
-📌 Сценарий:
-Ищем вход в лонг на откате
+Сценарий:
+Ждать откат для входа
 """
 
     if structure == "DOWNTREND":
         return "ШОРТ", f"""
-💧 Ликвидность:
+Нисходящий тренд
+
+Ликвидность:
 Сверху: {round(liquidity_high,4)}
 Снизу: {round(liquidity_low,4)}
 
-📌 Сценарий:
-Ищем вход в шорт на откате
+Сценарий:
+Ждать откат
 """
-
 
     return "ФЛЭТ", f"""
-💧 Ликвидность:
+Флэт
+
+Ликвидность:
 Сверху: {round(liquidity_high,4)}
 Снизу: {round(liquidity_low,4)}
 
-📌 Сценарий:
+Действие:
 Не входить
 """
-
 
 
 # === СДЕЛКА ВСЕГДА ===
@@ -204,32 +208,30 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     trend = get_trend(df)
     trade = build_trade(df, trend)
 
-    rend_emoji = "📈" if trend_state == "ЛОНГ" else "📉" if trend_state == "ШОРТ" else "⚖️"
+    text = f"""
+{symbol}/USDT
 
-    text = f"{symbol}/USDT\n\n"
-    text += f"{trend_emoji} Рынок: {trend_state}\n\n"
-    text += f"{comment.strip()}\n"
+Рынок: {trend_state}
+
+{comment}
+"""
+
     if trade:
         entry, stop, tp1, tp2, tp3 = trade
 
-    entry_type = "Сейчас" if abs(df["close"].iloc[-1] - entry) < (entry * 0.002) else "Лимитный"
+        text += f"""
 
-    text += f"""
+Рекомендуемый вход:
 
-    💰 Рекомендуемый вход:
-    Направление: {"📈 ЛОНГ" if trend == "LONG" else "📉 ШОРТ"}
-    Тип входа: {entry_type}
+Направление: {"ЛОНГ" if trend == "LONG" else "ШОРТ"}
 
-    Вход: {round(entry,4)}
-    Стоп: {round(stop,4)}
+Вход: {round(entry,4)}
+Стоп: {round(stop,4)}
 
-    🎯 Цели:
-    TP1: {round(tp1,4)}
-    TP2: {round(tp2,4)}
-    TP3: {round(tp3,4)}
-    
-    ⚠️ Оценивайте свои финансовые возможности и риски
-    """
+TP1: {round(tp1,4)}
+TP2: {round(tp2,4)}
+TP3: {round(tp3,4)}
+"""
 
     await update.message.reply_text(text)
 
