@@ -69,7 +69,7 @@ def get_order_block(df, trend):
     return None
 
 
-# === SMART ANALYSIS ===
+# === АНАЛИЗ ===
 def analyze_market_state(df, df_h):
     trend = get_trend(df)
     higher_trend = get_trend(df_h)
@@ -79,47 +79,41 @@ def analyze_market_state(df, df_h):
     liquidity_low = df["low"].rolling(20).min().iloc[-1]
 
     if trend != higher_trend:
-        return "RANGE", f"""
+        return "ФЛЭТ", f"""
 Против старшего тренда
 
 Сценарий:
 Движение по {higher_trend}
 
 Действие:
-Лучше не входить
+Не входить
 """
 
     if structure == "UPTREND":
-        return "LONG", f"""
-Восходящая структура
+        return "ЛОНГ", f"""
+Восходящий тренд
 
 Ликвидность:
 Сверху: {round(liquidity_high,4)}
 Снизу: {round(liquidity_low,4)}
 
 Сценарий:
-Рост после отката
-
-Действие:
-Ждать откат
+Ждать откат для входа
 """
 
     if structure == "DOWNTREND":
-        return "SHORT", f"""
-Нисходящая структура
+        return "ШОРТ", f"""
+Нисходящий тренд
 
 Ликвидность:
 Сверху: {round(liquidity_high,4)}
 Снизу: {round(liquidity_low,4)}
 
 Сценарий:
-Падение после отката
-
-Действие:
 Ждать откат
 """
 
-    return "RANGE", f"""
+    return "ФЛЭТ", f"""
 Флэт
 
 Ликвидность:
@@ -131,8 +125,33 @@ def analyze_market_state(df, df_h):
 """
 
 
-# === SIGNAL FILTER ===
-def analyze(df):
+# === СДЕЛКА ВСЕГДА ===
+def build_trade(df, trend):
+    ob = get_order_block(df, trend)
+    if not ob:
+        return None
+
+    ob_low, ob_high = ob
+    atr = (df["high"] - df["low"]).rolling(14).mean().iloc[-1]
+
+    if trend == "LONG":
+        entry = ob_low + (ob_high - ob_low) * 0.3
+        stop = ob_low - atr
+        tp1 = entry + atr * 2
+        tp2 = entry + atr * 3
+        tp3 = entry + atr * 4
+    else:
+        entry = ob_high - (ob_high - ob_low) * 0.3
+        stop = ob_high + atr
+        tp1 = entry - atr * 2
+        tp2 = entry - atr * 3
+        tp3 = entry - atr * 4
+
+    return entry, stop, tp1, tp2, tp3
+
+
+# === СИЛЬНЫЙ СИГНАЛ ===
+def analyze_signal(df):
     df["ema20"] = df["close"].ewm(span=20).mean()
     df["ema50"] = df["close"].ewm(span=50).mean()
 
@@ -166,51 +185,7 @@ def analyze(df):
     if last["volume"] < last["vol_ma"] * 1.3:
         return None
 
-    strength = "СИЛЬНЫЙ" if last["adx"] > 25 else "СРЕДНИЙ"
-
-    return trend, strength
-
-
-# === TRADE ===
-def build_trade(df, trend):
-    ob = get_order_block(df, trend)
-    if not ob:
-        return None
-
-    ob_low, ob_high = ob
-    atr = (df["high"] - df["low"]).rolling(14).mean().iloc[-1]
-
-    if trend == "LONG":
-        entry = ob_low + (ob_high - ob_low) * 0.25
-        stop = ob_low - atr * 0.5
-        tp1 = entry + atr * 2
-        tp2 = entry + atr * 3
-        tp3 = entry + atr * 4
-    else:
-        entry = ob_high - (ob_high - ob_low) * 0.25
-        stop = ob_high + atr * 0.5
-        tp1 = entry - atr * 2
-        tp2 = entry - atr * 3
-        tp3 = entry - atr * 4
-
-    return entry, stop, tp1, tp2, tp3
-
-
-# === FORMAT ===
-def format_signal(symbol, trend, strength, entry, stop, tp1, tp2, tp3):
-    side = "ЛОНГ" if trend == "LONG" else "ШОРТ"
-
-    return f"""
-Сигнал: {side}
-Сила: {strength}
-
-Вход: {round(entry,4)}
-Стоп: {round(stop,4)}
-
-TP1: {round(tp1,4)}
-TP2: {round(tp2,4)}
-TP3: {round(tp3,4)}
-"""
+    return trend
 
 
 # === HANDLE ===
@@ -230,36 +205,38 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     trend_state, comment = analyze_market_state(df, df_h)
 
-    trend_text = {
-        "LONG": "ЛОНГ",
-        "SHORT": "ШОРТ",
-        "RANGE": "ФЛЭТ"
-    }.get(trend_state, "ФЛЭТ")
+    trend = get_trend(df)
+    trade = build_trade(df, trend)
 
     text = f"""
 {symbol}/USDT
 
-Рынок: {trend_text}
+Рынок: {trend_state}
 
 {comment}
 """
 
-    result = analyze(df)
+    if trade:
+        entry, stop, tp1, tp2, tp3 = trade
 
-    if result:
-        trend, strength = result
+        text += f"""
 
-        if trend == get_trend(df_h):
-            trade = build_trade(df, trend)
+Рекомендуемый вход:
 
-            if trade:
-                entry, stop, tp1, tp2, tp3 = trade
-                text += "\n\n" + format_signal(symbol, trend, strength, entry, stop, tp1, tp2, tp3)
+Направление: {"ЛОНГ" if trend == "LONG" else "ШОРТ"}
+
+Вход: {round(entry,4)}
+Стоп: {round(stop,4)}
+
+TP1: {round(tp1,4)}
+TP2: {round(tp2,4)}
+TP3: {round(tp3,4)}
+"""
 
     await update.message.reply_text(text)
 
 
-# === AUTO ===
+# === АВТО СИГНАЛЫ ===
 async def scan_market(app):
     while True:
         for symbol in SYMBOLS:
@@ -269,34 +246,31 @@ async def scan_market(app):
             if df is None or df_h is None:
                 continue
 
-            price = df["close"].iloc[-1]
-            df["ema20"] = df["close"].ewm(span=20).mean()
-            ema = df["ema20"].iloc[-1]
-
-            atr = (df["high"] - df["low"]).rolling(14).mean().iloc[-1]
-
-            if abs(price - ema) < atr * 0.5:
-                await app.bot.send_message(
-                    chat_id=ALLOWED_CHAT_ID,
-                    text=f"{symbol} подходит к зоне входа"
-                )
-
-            result = analyze(df)
-            if not result:
+            signal = analyze_signal(df)
+            if not signal:
                 continue
 
-            trend, strength = result
-
-            if trend != get_trend(df_h):
+            if signal != get_trend(df_h):
                 continue
 
-            trade = build_trade(df, trend)
+            trade = build_trade(df, signal)
             if not trade:
                 continue
 
             entry, stop, tp1, tp2, tp3 = trade
 
-            text = f"СИГНАЛ {symbol}\n" + format_signal(symbol, trend, strength, entry, stop, tp1, tp2, tp3)
+            text = f"""
+СИГНАЛ {symbol}
+
+Направление: {"ЛОНГ" if signal == "LONG" else "ШОРТ"}
+
+Вход: {round(entry,4)}
+Стоп: {round(stop,4)}
+
+TP1: {round(tp1,4)}
+TP2: {round(tp2,4)}
+TP3: {round(tp3,4)}
+"""
 
             await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, text=text)
 
