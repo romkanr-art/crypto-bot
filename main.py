@@ -8,7 +8,7 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
 
 TOKEN = "8773850466:AAF0ZYcuNusn9R8TzyxQRCZoY2Nz2pg6MiA"
-ALLOWED_CHAT_ID = -1003130189488  # ВСТАВЬ ID ГРУППЫ
+ALLOWED_CHAT_ID = -1003130189488
 
 SYMBOLS = ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA"]
 
@@ -44,16 +44,10 @@ def get_market_structure(df):
     highs = df["high"].rolling(5).max()
     lows = df["low"].rolling(5).min()
 
-    last_high = highs.iloc[-1]
-    prev_high = highs.iloc[-5]
-
-    last_low = lows.iloc[-1]
-    prev_low = lows.iloc[-5]
-
-    if last_high > prev_high and last_low > prev_low:
+    if highs.iloc[-1] > highs.iloc[-5] and lows.iloc[-1] > lows.iloc[-5]:
         return "UPTREND"
 
-    if last_high < prev_high and last_low < prev_low:
+    if highs.iloc[-1] < highs.iloc[-5] and lows.iloc[-1] < lows.iloc[-5]:
         return "DOWNTREND"
 
     return "RANGE"
@@ -75,13 +69,11 @@ def get_order_block(df, trend):
     return None
 
 
-# === УМНЫЙ АНАЛИЗ ===
+# === SMART ANALYSIS ===
 def analyze_market_state(df, df_h):
     trend = get_trend(df)
     higher_trend = get_trend(df_h)
     structure = get_market_structure(df)
-
-    price = df["close"].iloc[-1]
 
     liquidity_high = df["high"].rolling(20).max().iloc[-1]
     liquidity_low = df["low"].rolling(20).min().iloc[-1]
@@ -91,7 +83,7 @@ def analyze_market_state(df, df_h):
 Против старшего тренда
 
 Сценарий:
-Вероятно движение по старшему тренду ({higher_trend})
+Движение по {higher_trend}
 
 Действие:
 Лучше не входить
@@ -99,14 +91,14 @@ def analyze_market_state(df, df_h):
 
     if structure == "UPTREND":
         return "LONG", f"""
-Восходящая структура (HH/HL)
+Восходящая структура
 
 Ликвидность:
 Сверху: {round(liquidity_high,4)}
 Снизу: {round(liquidity_low,4)}
 
 Сценарий:
-Продолжение роста после отката
+Рост после отката
 
 Действие:
 Ждать откат
@@ -114,14 +106,14 @@ def analyze_market_state(df, df_h):
 
     if structure == "DOWNTREND":
         return "SHORT", f"""
-Нисходящая структура (LL/LH)
+Нисходящая структура
 
 Ликвидность:
 Сверху: {round(liquidity_high,4)}
 Снизу: {round(liquidity_low,4)}
 
 Сценарий:
-Продолжение падения после отката
+Падение после отката
 
 Действие:
 Ждать откат
@@ -134,15 +126,12 @@ def analyze_market_state(df, df_h):
 Сверху: {round(liquidity_high,4)}
 Снизу: {round(liquidity_low,4)}
 
-Сценарий:
-Ложные движения
-
 Действие:
 Не входить
 """
 
 
-# === СИЛЬНЫЙ СИГНАЛ ===
+# === SIGNAL FILTER ===
 def analyze(df):
     df["ema20"] = df["close"].ewm(span=20).mean()
     df["ema50"] = df["close"].ewm(span=50).mean()
@@ -182,7 +171,7 @@ def analyze(df):
     return trend, strength
 
 
-# === СДЕЛКА ===
+# === TRADE ===
 def build_trade(df, trend):
     ob = get_order_block(df, trend)
     if not ob:
@@ -239,7 +228,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Монета не найдена")
         return
 
-    # анализ
     trend_state, comment = analyze_market_state(df, df_h)
 
     trend_text = {
@@ -256,7 +244,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 {comment}
 """
 
-    # сигнал
     result = analyze(df)
 
     if result:
@@ -272,7 +259,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text)
 
 
-# === АВТО СИГНАЛЫ ===
+# === AUTO ===
 async def scan_market(app):
     while True:
         for symbol in SYMBOLS:
@@ -282,7 +269,6 @@ async def scan_market(app):
             if df is None or df_h is None:
                 continue
 
-            # уведомление о подходе
             price = df["close"].iloc[-1]
             df["ema20"] = df["close"].ewm(span=20).mean()
             ema = df["ema20"].iloc[-1]
@@ -322,8 +308,11 @@ app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(MessageHandler(filters.TEXT, handle_message))
 
-async def main():
-    asyncio.create_task(scan_market(app))
-    await app.run_polling()
 
-asyncio.run(main())
+async def on_start(app):
+    asyncio.create_task(scan_market(app))
+
+
+app.post_init = on_start
+
+app.run_polling()
