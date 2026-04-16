@@ -89,11 +89,6 @@ def analyze_market_state(df, df_h):
 Не входить
 """
 
-
-📌 Сценарий:
-Не входить
-"""
-
     if structure == "UPTREND":
         return "ЛОНГ", f"""
 💧 Ликвидность:
