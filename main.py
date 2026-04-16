@@ -124,8 +124,6 @@ def create_chart(df):
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     awayt update.message.reply_text(f"ID этой группы: {chat_id}")
-    user_input = update.message.text.upper()
-    symbol = find_symbol(user_input)
 
     if symbol is None:
         await update.message.reply_text("❌ Монета не найдена")
