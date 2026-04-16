@@ -212,7 +212,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if trade:
         entry, stop, tp1, tp2, tp3 = trade
 
-       entry_type = "Сейчас" if abs(df["close"].iloc[-1] - entry) < (entry * 0.002) else "Лимитный"
+    entry_type = "Сейчас" if abs(df["close"].iloc[-1] - entry) < (entry * 0.002) else "Лимитный"
 
     text += f"""
 
