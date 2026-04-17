@@ -133,7 +133,7 @@ def confirm_entry(df, zone, trend):
     return None
 
 
-# ================= TRADE =================
+# ================= TRADE (ТОЛЬКО ДЛЯ СИГНАЛОВ) =================
 def build_trade(df, trend, zone):
     if not zone:
         return None
@@ -158,7 +158,6 @@ def build_trade(df, trend, zone):
         tp1 = entry + risk * 1
         tp2 = entry + risk * 2
         tp3 = entry + risk * 4
-
     else:
         stop = high + atr * 1.2
         risk = stop - entry
@@ -170,34 +169,7 @@ def build_trade(df, trend, zone):
     return entry, stop, tp1, tp2, tp3
 
 
-# ================= ANALYSIS =================
-def analyze(df, df_h):
-    df = add_indicators(df)
-    df_h = add_indicators(df_h)
-
-    trend = get_trend(df)
-    higher = get_trend(df_h)
-
-    high_liq = df["high"].rolling(30).max().iloc[-1]
-    low_liq = df["low"].rolling(30).min().iloc[-1]
-
-    state = "⚖️ ФЛЭТ"
-    scenario = "Не входить"
-
-    if trend == higher:
-        if trend == "LONG":
-            state = "📈 ЛОНГ"
-            scenario = "Ищем покупки"
-        else:
-            state = "📉 ШОРТ"
-            scenario = "Ищем продажи"
-
-    zone = get_zone(df, trend)
-
-    return state, scenario, high_liq, low_liq, zone, trend, df
-
-
-# ================= HANDLER =================
+# ================= АНАЛИЗ (ДЛЯ ПОЛЬЗОВАТЕЛЯ) =================
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if update.effective_chat.id != ALLOWED_CHAT_ID:
@@ -217,41 +189,68 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Монета не найдена")
         return
 
-    state, scenario, high_liq, low_liq, zone, trend, df = analyze(df, df_h)
+    df = add_indicators(df)
+    df_h = add_indicators(df_h)
+
+    trend = get_trend(df)
+    higher = get_trend(df_h)
+
+    high_liq = df["high"].rolling(30).max().iloc[-1]
+    low_liq = df["low"].rolling(30).min().iloc[-1]
+
+    zone = get_zone(df, trend)
 
     msg = f"🚀 {symbol}/USDT ({source})\n\n"
-    msg += f"📊 Рынок: {state}\n\n"
+
+    if trend == higher:
+        msg += f"📊 Рынок: {'📈 ЛОНГ' if trend=='LONG' else '📉 ШОРТ'}\n\n"
+    else:
+        msg += "📊 Рынок: ⚖️ ФЛЭТ\n\n"
+
     msg += f"💧 Ликвидность:\n⬆️ {round(high_liq,4)}\n⬇️ {round(low_liq,4)}\n\n"
-    msg += f"📌 Сценарий:\n{scenario}\n\n"
+
+    msg += f"📌 Сценарий:\n{'Ищем вход в лонг на откате' if trend=='LONG' else 'Ищем вход в шорт на откате'}\n\n"
 
     if zone:
-        msg += f"📍 Зона: {round(zone[0],4)} - {round(zone[1],4)}\n\n"
+        low, high = zone
+        entry = (low + high) / 2
+        atr = df["atr"].iloc[-1]
 
-    trade = build_trade(df, trend, zone)
+        if trend == "LONG":
+            stop = low - atr * 1.2
+            risk = entry - stop
 
-    if trade:
-        entry, stop, tp1, tp2, tp3 = trade
+            tp1 = entry + risk * 1
+            tp2 = entry + risk * 2
+            tp3 = entry + risk * 4
+        else:
+            stop = high + atr * 1.2
+            risk = stop - entry
 
-        msg += f"""🚨 СИГНАЛ
+            tp1 = entry - risk * 1
+            tp2 = entry - risk * 2
+            tp3 = entry - risk * 4
 
-{"📈 ЛОНГ" if trend=="LONG" else "📉 ШОРТ"}
+        msg += f"📍 Зона входа:\n{round(low,4)} - {round(high,4)}\n\n"
 
-💰 Вход: {round(entry,4)}
-🛑 Стоп: {round(stop,4)}
+        msg += f"""💰 Сделка:
+
+{'📈 ЛОНГ' if trend=='LONG' else '📉 ШОРТ'}
+
+Вход: {round(entry,4)}
+Стоп: {round(stop,4)}
 
 🎯 TP1: {round(tp1,4)}
 🎯 TP2: {round(tp2,4)}
 🎯 TP3: {round(tp3,4)}
 """
-    else:
-        msg += "⏳ Нет входа, ждём подтверждение"
 
-    msg += "\n\n⚠️ Оценивайте свои возможности и риски\nВход 1-2% от депозита!"
+    msg += "\n⚠️ Оценивайте свои возможности и риски\nВход 1-2% от депозита!"
 
     await update.message.reply_text(msg)
 
 
-# ================= AUTO =================
+# ================= АВТОСИГНАЛЫ =================
 async def scan_market(app):
     await asyncio.sleep(10)
 
@@ -280,7 +279,7 @@ async def scan_market(app):
 
             text = f"""🚨 СИГНАЛ {symbol} ({source})
 
-{"📈 ЛОНГ" if trend=="LONG" else "📉 ШОРТ"}
+{'📈 ЛОНГ' if trend=='LONG' else '📉 ШОРТ'}
 
 💰 Вход: {round(entry,4)}
 🛑 Стоп: {round(stop,4)}
@@ -297,7 +296,7 @@ async def scan_market(app):
         await asyncio.sleep(600)
 
 
-# ================= START =================
+# ================= ЗАПУСК =================
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(MessageHandler(filters.TEXT, handle_message))
