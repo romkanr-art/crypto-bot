@@ -13,7 +13,7 @@ ALLOWED_CHAT_ID = -1003130189488
 SYMBOLS = ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA"]
 
 
-# ================= BINANCE FUTURES =================
+# ================= DATA =================
 def get_binance_futures(symbol, interval="15m"):
     try:
         url = f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol}USDT&interval={interval}&limit=150"
@@ -34,19 +34,16 @@ def get_binance_futures(symbol, interval="15m"):
         return None
 
 
-# ================= BYBIT FUTURES =================
-def get_bybit_futures(symbol, interval="15"):
+def get_bybit_futures(symbol):
     try:
-        url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={symbol}USDT&interval={interval}&limit=150"
+        url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={symbol}USDT&interval=15&limit=150"
         res = requests.get(url, timeout=10).json()
 
         if res.get("retCode") != 0:
             return None
 
         data = res["result"]["list"]
-
-        df = pd.DataFrame(data)
-        df = df.iloc[::-1]
+        df = pd.DataFrame(data)[::-1]
 
         df.columns = ["time","open","high","low","close","volume","turnover"]
         df = df[["time","open","high","low","close","volume"]]
@@ -60,7 +57,6 @@ def get_bybit_futures(symbol, interval="15"):
         return None
 
 
-# ================= UNIVERSAL =================
 def get_market_data(symbol, interval="15m"):
     df = get_binance_futures(symbol, interval)
     if df is not None:
@@ -87,14 +83,13 @@ def get_trend(df):
     return "LONG" if last["ema20"] > last["ema50"] else "SHORT"
 
 
-# ================= FLAT FILTER =================
+# ================= FILTERS =================
 def is_flat(df):
     atr = df["atr"].iloc[-1]
-    avg_range = (df["high"] - df["low"]).rolling(20).mean().iloc[-1]
-    return atr < avg_range * 0.7
+    avg = (df["high"] - df["low"]).rolling(20).mean().iloc[-1]
+    return atr < avg * 0.7
 
 
-# ================= VOLUME =================
 def volume_spike(df):
     last = df.iloc[-1]
     return last["volume"] > last["vol_ma"] * 1.5
@@ -116,7 +111,7 @@ def get_zone(df, trend):
     return None
 
 
-# ================= SMART ENTRY =================
+# ================= ENTRY =================
 def confirm_entry(df, zone, trend):
     if not zone:
         return None
@@ -127,22 +122,12 @@ def confirm_entry(df, zone, trend):
     prev = df.iloc[-2]
     prev2 = df.iloc[-3]
 
-    # LONG
     if trend == "LONG":
-        sweep = prev2["low"] < low
-        reclaim = prev["close"] > low
-        confirm = last["close"] > prev["high"]
-
-        if sweep and reclaim and confirm:
+        if prev2["low"] < low and prev["close"] > low and last["close"] > prev["high"]:
             return last["close"]
 
-    # SHORT
     if trend == "SHORT":
-        sweep = prev2["high"] > high
-        reclaim = prev["close"] < high
-        confirm = last["close"] < prev["low"]
-
-        if sweep and reclaim and confirm:
+        if prev2["high"] > high and prev["close"] < high and last["close"] < prev["low"]:
             return last["close"]
 
     return None
@@ -160,7 +145,6 @@ def build_trade(df, trend, zone):
         return None
 
     entry = confirm_entry(df, zone, trend)
-
     if not entry:
         return None
 
@@ -203,28 +187,28 @@ def analyze(df, df_h):
     if trend == higher:
         if trend == "LONG":
             state = "📈 ЛОНГ"
-            scenario = "Ищем вход в лонг"
+            scenario = "Ищем покупки"
         else:
             state = "📉 ШОРТ"
-            scenario = "Ищем вход в шорт"
+            scenario = "Ищем продажи"
 
     zone = get_zone(df, trend)
 
     return state, scenario, high_liq, low_liq, zone, trend, df
 
 
-# ================= USER =================
+# ================= HANDLER =================
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if update.effective_chat.id != ALLOWED_CHAT_ID:
         return
 
-    text = update.message.text.strip().upper()
+    text = update.message.text.strip()
 
     if not text.startswith("/"):
         return
 
-    symbol = text.replace("/", "").replace("USDT", "").strip()
+    symbol = text.split("@")[0].replace("/", "").replace("USDT", "").upper().strip()
 
     df, source = get_market_data(symbol, "15m")
     df_h, _ = get_market_data(symbol, "1h")
@@ -235,8 +219,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     state, scenario, high_liq, low_liq, zone, trend, df = analyze(df, df_h)
 
-    msg = f"{symbol}/USDT ({source})\n\n{state}\n\n"
-    msg += f"💧 Ликвидность:\n↑ {round(high_liq,4)}\n↓ {round(low_liq,4)}\n\n"
+    msg = f"🚀 {symbol}/USDT ({source})\n\n"
+    msg += f"📊 Рынок: {state}\n\n"
+    msg += f"💧 Ликвидность:\n⬆️ {round(high_liq,4)}\n⬇️ {round(low_liq,4)}\n\n"
     msg += f"📌 Сценарий:\n{scenario}\n\n"
 
     if zone:
@@ -247,21 +232,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if trade:
         entry, stop, tp1, tp2, tp3 = trade
 
-        msg += f"""🚀 СИГНАЛ
+        msg += f"""🚨 СИГНАЛ
 
 {"📈 ЛОНГ" if trend=="LONG" else "📉 ШОРТ"}
 
-Вход: {round(entry,4)}
-Стоп: {round(stop,4)}
+💰 Вход: {round(entry,4)}
+🛑 Стоп: {round(stop,4)}
 
-TP1: {round(tp1,4)}
-TP2: {round(tp2,4)}
-TP3: {round(tp3,4)}
+🎯 TP1: {round(tp1,4)}
+🎯 TP2: {round(tp2,4)}
+🎯 TP3: {round(tp3,4)}
 """
     else:
-        msg += "⏳ Нет входа (ждём подтверждение)"
+        msg += "⏳ Нет входа, ждём подтверждение"
 
-    msg += "\n\n⚠️ Оценивайте свои финансовые возможности и риски"
+    msg += "\n\n⚠️ Оценивайте свои возможности и риски\nВход 1-2% от депозита!"
 
     await update.message.reply_text(msg)
 
@@ -297,12 +282,14 @@ async def scan_market(app):
 
 {"📈 ЛОНГ" if trend=="LONG" else "📉 ШОРТ"}
 
-Вход: {round(entry,4)}
-Стоп: {round(stop,4)}
+💰 Вход: {round(entry,4)}
+🛑 Стоп: {round(stop,4)}
 
-TP1: {round(tp1,4)}
-TP2: {round(tp2,4)}
-TP3: {round(tp3,4)}
+🎯 TP1: {round(tp1,4)}
+🎯 TP2: {round(tp2,4)}
+🎯 TP3: {round(tp3,4)}
+
+⚠️ Риск 1-2% от депозита
 """
 
             await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, text=text)
