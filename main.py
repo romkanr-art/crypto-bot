@@ -10,13 +10,7 @@ from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTyp
 TOKEN = "8773850466:AAF0ZYcuNusn9R8TzyxQRCZoY2Nz2pg6MiA"
 ALLOWED_CHAT_ID = -1003130189488
 
-SYMBOLS = ["BTC","ETH","SOL","BNB","XRP","ADA","DOGE","AVAX","LINK","MATIC"]
-
-active_trades = {}
 watchlist = {}
-
-stats = {"total": 0, "win": 0, "loss": 0}
-
 
 # ================= DATA =================
 def get_binance(symbol, interval):
@@ -76,17 +70,6 @@ def get_zone(df, trend):
     return None
 
 
-def is_flat(df):
-    atr = df["atr"].iloc[-1]
-    avg = (df["high"] - df["low"]).rolling(20).mean().iloc[-1]
-    return atr < avg * 0.7
-
-
-def volume_spike(df):
-    last = df.iloc[-1]
-    return last["volume"] > last["vol_ma"] * 1.5
-
-
 def confirm_entry(df, zone, trend):
     if not zone:
         return None
@@ -108,33 +91,6 @@ def confirm_entry(df, zone, trend):
     return None
 
 
-def build_trade(df, trend, zone):
-    if not zone or is_flat(df) or not volume_spike(df):
-        return None
-
-    entry = confirm_entry(df, zone, trend)
-    if not entry:
-        return None
-
-    low, high = zone
-    atr = df["atr"].iloc[-1]
-
-    if trend == "LONG":
-        stop = low - atr * 1.2
-        risk = entry - stop
-        tp1 = entry + risk
-        tp2 = entry + risk * 2
-        tp3 = entry + risk * 4
-    else:
-        stop = high + atr * 1.2
-        risk = stop - entry
-        tp1 = entry - risk
-        tp2 = entry - risk * 2
-        tp3 = entry - risk * 4
-
-    return entry, stop, tp1, tp2, tp3
-
-
 # ================= ANALYSIS =================
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -142,6 +98,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     text = update.message.text.strip()
+
     if not text.startswith("/"):
         return
 
@@ -162,7 +119,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     zone = get_zone(df, trend)
 
-    # ===== WATCHLIST =====
+    # ================= WATCHLIST =================
     if zone:
         user = update.effective_user
 
@@ -183,14 +140,64 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "name": user.first_name
             })
 
-    # ===== MESSAGE =====
+    # ================= MESSAGE =================
+    high_liq = df["high"].rolling(30).max().iloc[-1]
+    low_liq = df["low"].rolling(30).min().iloc[-1]
+
     msg = f"🚀 {symbol}/USDT ({source})\n\n"
     msg += f"📊 Рынок: {'📈 ЛОНГ' if trend==higher else '⚖️ ФЛЭТ'}\n\n"
+
+    msg += f"""💧 Ликвидность:
+⬆️ {round(high_liq,4)}
+⬇️ {round(low_liq,4)}
+
+"""
+
+    msg += f"📌 Сценарий:\n{'Ищем лонг' if trend=='LONG' else 'Ищем шорт'}\n\n"
+
+    if zone:
+        low, high = zone
+
+        entry = (low + high) / 2
+        atr = df["atr"].iloc[-1]
+
+        if trend == "LONG":
+            stop = low - atr * 1.2
+            risk = entry - stop
+            tp1 = entry + risk
+            tp2 = entry + risk * 2
+            tp3 = entry + risk * 4
+        else:
+            stop = high + atr * 1.2
+            risk = stop - entry
+            tp1 = entry - risk
+            tp2 = entry - risk * 2
+            tp3 = entry - risk * 4
+
+        status = confirm_entry(df, zone, trend)
+
+        msg += f"""📍 Зона входа:
+{round(low,4)} - {round(high,4)}
+
+⚡ Сейчас: {'МОЖНО ВХОДИТЬ' if status else 'ЖДАТЬ'}
+
+💰 Сделка:
+{'📈 ЛОНГ' if trend=='LONG' else '📉 ШОРТ'}
+
+Вход: {round(entry,4)}
+Стоп: {round(stop,4)}
+
+🎯 TP1: {round(tp1,4)}
+🎯 TP2: {round(tp2,4)}
+🎯 TP3: {round(tp3,4)}
+"""
+
+    msg += "\n⚠️ Оценивайте риски\nВход 1-2% от депозита"
 
     await update.message.reply_text(msg)
 
 
-# ================= WATCHLIST MONITOR =================
+# ================= WATCHLIST =================
 async def monitor_watchlist(app):
     await asyncio.sleep(20)
 
@@ -199,6 +206,7 @@ async def monitor_watchlist(app):
 
         for symbol, w in watchlist.items():
 
+            # время жизни 1 час
             if pd.Timestamp.now().timestamp() - w["time"] > 3600:
                 remove.append(symbol)
                 continue
@@ -222,6 +230,7 @@ async def monitor_watchlist(app):
             if entry:
 
                 mentions = []
+
                 for u in w["users"]:
                     if u["username"]:
                         mentions.append(f"@{u['username']}")
