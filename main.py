@@ -10,19 +10,29 @@ from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTyp
 TOKEN = "8773850466:AAF0ZYcuNusn9R8TzyxQRCZoY2Nz2pg6MiA"
 ALLOWED_CHAT_ID = -1003130189488
 
-SYMBOLS = ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA"]
+SYMBOLS = ["BTC","ETH","SOL","BNB","XRP","ADA","DOGE","AVAX","LINK","MATIC"]
+
+
+# ================= STORAGE =================
+active_trades = {}
+
+stats = {
+    "total": 0,
+    "win": 0,
+    "loss": 0
+}
 
 
 # ================= DATA =================
-def get_binance_futures(symbol, interval="15m"):
+def get_binance(symbol, interval):
     try:
         url = f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol}USDT&interval={interval}&limit=150"
-        res = requests.get(url, timeout=10).json()
+        data = requests.get(url, timeout=10).json()
 
-        if isinstance(res, dict):
+        if isinstance(data, dict):
             return None
 
-        df = pd.DataFrame(res)[[0,1,2,3,4,5]]
+        df = pd.DataFrame(data)[[0,1,2,3,4,5]]
         df.columns = ["time","open","high","low","close","volume"]
         df = df.astype(float)
 
@@ -34,38 +44,10 @@ def get_binance_futures(symbol, interval="15m"):
         return None
 
 
-def get_bybit_futures(symbol):
-    try:
-        url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={symbol}USDT&interval=15&limit=150"
-        res = requests.get(url, timeout=10).json()
-
-        if res.get("retCode") != 0:
-            return None
-
-        data = res["result"]["list"]
-        df = pd.DataFrame(data)[::-1]
-
-        df.columns = ["time","open","high","low","close","volume","turnover"]
-        df = df[["time","open","high","low","close","volume"]]
-
-        df = df.astype(float)
-        df["time"] = pd.to_datetime(df["time"], unit='ms')
-        df.set_index("time", inplace=True)
-
-        return df
-    except:
-        return None
-
-
-def get_market_data(symbol, interval="15m"):
-    df = get_binance_futures(symbol, interval)
+def get_market(symbol, interval):
+    df = get_binance(symbol, interval)
     if df is not None:
         return df, "Binance"
-
-    df = get_bybit_futures(symbol)
-    if df is not None:
-        return df, "Bybit"
-
     return None, None
 
 
@@ -83,19 +65,7 @@ def get_trend(df):
     return "LONG" if last["ema20"] > last["ema50"] else "SHORT"
 
 
-# ================= FILTERS =================
-def is_flat(df):
-    atr = df["atr"].iloc[-1]
-    avg = (df["high"] - df["low"]).rolling(20).mean().iloc[-1]
-    return atr < avg * 0.7
-
-
-def volume_spike(df):
-    last = df.iloc[-1]
-    return last["volume"] > last["vol_ma"] * 1.5
-
-
-# ================= ZONE =================
+# ================= LOGIC =================
 def get_zone(df, trend):
     candles = df.tail(12)
 
@@ -111,7 +81,17 @@ def get_zone(df, trend):
     return None
 
 
-# ================= ENTRY =================
+def is_flat(df):
+    atr = df["atr"].iloc[-1]
+    avg = (df["high"] - df["low"]).rolling(20).mean().iloc[-1]
+    return atr < avg * 0.7
+
+
+def volume_spike(df):
+    last = df.iloc[-1]
+    return last["volume"] > last["vol_ma"] * 1.5
+
+
 def confirm_entry(df, zone, trend):
     if not zone:
         return None
@@ -133,15 +113,8 @@ def confirm_entry(df, zone, trend):
     return None
 
 
-# ================= TRADE (ТОЛЬКО ДЛЯ СИГНАЛОВ) =================
 def build_trade(df, trend, zone):
-    if not zone:
-        return None
-
-    if is_flat(df):
-        return None
-
-    if not volume_spike(df):
+    if not zone or is_flat(df) or not volume_spike(df):
         return None
 
     entry = confirm_entry(df, zone, trend)
@@ -154,14 +127,12 @@ def build_trade(df, trend, zone):
     if trend == "LONG":
         stop = low - atr * 1.2
         risk = entry - stop
-
         tp1 = entry + risk * 1
         tp2 = entry + risk * 2
         tp3 = entry + risk * 4
     else:
         stop = high + atr * 1.2
         risk = stop - entry
-
         tp1 = entry - risk * 1
         tp2 = entry - risk * 2
         tp3 = entry - risk * 4
@@ -169,21 +140,20 @@ def build_trade(df, trend, zone):
     return entry, stop, tp1, tp2, tp3
 
 
-# ================= АНАЛИЗ (ДЛЯ ПОЛЬЗОВАТЕЛЯ) =================
+# ================= ANALYSIS =================
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if update.effective_chat.id != ALLOWED_CHAT_ID:
         return
 
     text = update.message.text.strip()
-
     if not text.startswith("/"):
         return
 
-    symbol = text.split("@")[0].replace("/", "").replace("USDT", "").upper().strip()
+    symbol = text.replace("/", "").upper()
 
-    df, source = get_market_data(symbol, "15m")
-    df_h, _ = get_market_data(symbol, "1h")
+    df, source = get_market(symbol, "15m")
+    df_h, _ = get_market(symbol, "1h")
 
     if df is None or df_h is None:
         await update.message.reply_text("❌ Монета не найдена")
@@ -202,14 +172,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     msg = f"🚀 {symbol}/USDT ({source})\n\n"
 
-    if trend == higher:
-        msg += f"📊 Рынок: {'📈 ЛОНГ' if trend=='LONG' else '📉 ШОРТ'}\n\n"
-    else:
-        msg += "📊 Рынок: ⚖️ ФЛЭТ\n\n"
-
+    msg += f"📊 Рынок: {'📈 ЛОНГ' if trend==higher else '⚖️ ФЛЭТ'}\n\n"
     msg += f"💧 Ликвидность:\n⬆️ {round(high_liq,4)}\n⬇️ {round(low_liq,4)}\n\n"
-
-    msg += f"📌 Сценарий:\n{'Ищем вход в лонг на откате' if trend=='LONG' else 'Ищем вход в шорт на откате'}\n\n"
+    msg += f"📌 Сценарий:\n{'Ищем лонг' if trend=='LONG' else 'Ищем шорт'}\n\n"
 
     if zone:
         low, high = zone
@@ -219,22 +184,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if trend == "LONG":
             stop = low - atr * 1.2
             risk = entry - stop
-
-            tp1 = entry + risk * 1
+            tp1 = entry + risk
             tp2 = entry + risk * 2
             tp3 = entry + risk * 4
         else:
             stop = high + atr * 1.2
             risk = stop - entry
-
-            tp1 = entry - risk * 1
+            tp1 = entry - risk
             tp2 = entry - risk * 2
             tp3 = entry - risk * 4
 
-        msg += f"📍 Зона входа:\n{round(low,4)} - {round(high,4)}\n\n"
-
+        msg += f"📍 Зона: {round(low,4)} - {round(high,4)}\n\n"
         msg += f"""💰 Сделка:
-
 {'📈 ЛОНГ' if trend=='LONG' else '📉 ШОРТ'}
 
 Вход: {round(entry,4)}
@@ -245,19 +206,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🎯 TP3: {round(tp3,4)}
 """
 
-    msg += "\n⚠️ Оценивайте свои возможности и риски\nВход 1-2% от депозита!"
+    msg += "\n⚠️ Оценивайте риски\nВход 1-2% от депозита"
 
     await update.message.reply_text(msg)
 
 
-# ================= АВТОСИГНАЛЫ =================
+# ================= AUTO SIGNAL =================
 async def scan_market(app):
     await asyncio.sleep(10)
 
     while True:
         for symbol in SYMBOLS:
-            df, source = get_market_data(symbol, "15m")
-            df_h, _ = get_market_data(symbol, "1h")
+
+            df, source = get_market(symbol, "15m")
+            df_h, _ = get_market(symbol, "1h")
 
             if df is None or df_h is None:
                 continue
@@ -277,18 +239,28 @@ async def scan_market(app):
 
             entry, stop, tp1, tp2, tp3 = trade
 
-            text = f"""🚨 СИГНАЛ {symbol} ({source})
+            trade_id = f"{symbol}_{int(pd.Timestamp.now().timestamp())}"
+
+            active_trades[trade_id] = {
+                "symbol": symbol,
+                "trend": trend,
+                "entry": entry,
+                "stop": stop,
+                "tp1": tp1,
+                "tp2": tp2,
+                "tp3": tp3
+            }
+
+            text = f"""🚨 СИГНАЛ {symbol}
 
 {'📈 ЛОНГ' if trend=='LONG' else '📉 ШОРТ'}
 
-💰 Вход: {round(entry,4)}
-🛑 Стоп: {round(stop,4)}
+Вход: {round(entry,4)}
+Стоп: {round(stop,4)}
 
-🎯 TP1: {round(tp1,4)}
-🎯 TP2: {round(tp2,4)}
-🎯 TP3: {round(tp3,4)}
-
-⚠️ Риск 1-2% от депозита
+TP1: {round(tp1,4)}
+TP2: {round(tp2,4)}
+TP3: {round(tp3,4)}
 """
 
             await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, text=text)
@@ -296,7 +268,56 @@ async def scan_market(app):
         await asyncio.sleep(600)
 
 
-# ================= ЗАПУСК =================
+# ================= MONITOR =================
+async def monitor_trades(app):
+    await asyncio.sleep(20)
+
+    while True:
+        remove = []
+
+        for tid, t in active_trades.items():
+
+            df, _ = get_market(t["symbol"], "1m")
+            if df is None:
+                continue
+
+            price = df["close"].iloc[-1]
+
+            if t["trend"] == "LONG":
+
+                if price <= t["stop"]:
+                    stats["total"] += 1
+                    stats["loss"] += 1
+                    await app.bot.send_message(ALLOWED_CHAT_ID, f"❌ {t['symbol']} SL")
+                    remove.append(tid)
+
+                elif price >= t["tp3"]:
+                    stats["total"] += 1
+                    stats["win"] += 1
+                    await app.bot.send_message(ALLOWED_CHAT_ID, f"✅ {t['symbol']} TP3 🚀")
+                    remove.append(tid)
+
+            else:
+
+                if price >= t["stop"]:
+                    stats["total"] += 1
+                    stats["loss"] += 1
+                    await app.bot.send_message(ALLOWED_CHAT_ID, f"❌ {t['symbol']} SL")
+                    remove.append(tid)
+
+                elif price <= t["tp3"]:
+                    stats["total"] += 1
+                    stats["win"] += 1
+                    await app.bot.send_message(ALLOWED_CHAT_ID, f"✅ {t['symbol']} TP3 🚀")
+                    remove.append(tid)
+
+        for r in remove:
+            active_trades.pop(r, None)
+
+        await asyncio.sleep(30)
+
+
+# ================= START =================
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(MessageHandler(filters.TEXT, handle_message))
@@ -304,6 +325,7 @@ app.add_handler(MessageHandler(filters.TEXT, handle_message))
 
 async def on_start(app):
     asyncio.create_task(scan_market(app))
+    asyncio.create_task(monitor_trades(app))
 
 
 app.post_init = on_start
