@@ -12,15 +12,10 @@ ALLOWED_CHAT_ID = -1003130189488
 
 SYMBOLS = ["BTC","ETH","SOL","BNB","XRP","ADA","DOGE","AVAX","LINK","MATIC"]
 
-
-# ================= STORAGE =================
 active_trades = {}
+watchlist = {}
 
-stats = {
-    "total": 0,
-    "win": 0,
-    "loss": 0
-}
+stats = {"total": 0, "win": 0, "loss": 0}
 
 
 # ================= DATA =================
@@ -127,13 +122,13 @@ def build_trade(df, trend, zone):
     if trend == "LONG":
         stop = low - atr * 1.2
         risk = entry - stop
-        tp1 = entry + risk * 1
+        tp1 = entry + risk
         tp2 = entry + risk * 2
         tp3 = entry + risk * 4
     else:
         stop = high + atr * 1.2
         risk = stop - entry
-        tp1 = entry - risk * 1
+        tp1 = entry - risk
         tp2 = entry - risk * 2
         tp3 = entry - risk * 4
 
@@ -165,60 +160,50 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     trend = get_trend(df)
     higher = get_trend(df_h)
 
-    high_liq = df["high"].rolling(30).max().iloc[-1]
-    low_liq = df["low"].rolling(30).min().iloc[-1]
-
     zone = get_zone(df, trend)
 
-    msg = f"🚀 {symbol}/USDT ({source})\n\n"
-
-    msg += f"📊 Рынок: {'📈 ЛОНГ' if trend==higher else '⚖️ ФЛЭТ'}\n\n"
-    msg += f"💧 Ликвидность:\n⬆️ {round(high_liq,4)}\n⬇️ {round(low_liq,4)}\n\n"
-    msg += f"📌 Сценарий:\n{'Ищем лонг' if trend=='LONG' else 'Ищем шорт'}\n\n"
-
+    # ===== WATCHLIST =====
     if zone:
-        low, high = zone
-        entry = (low + high) / 2
-        atr = df["atr"].iloc[-1]
+        user = update.effective_user
 
-        if trend == "LONG":
-            stop = low - atr * 1.2
-            risk = entry - stop
-            tp1 = entry + risk
-            tp2 = entry + risk * 2
-            tp3 = entry + risk * 4
-        else:
-            stop = high + atr * 1.2
-            risk = stop - entry
-            tp1 = entry - risk
-            tp2 = entry - risk * 2
-            tp3 = entry - risk * 4
+        if symbol not in watchlist:
+            watchlist[symbol] = {
+                "zone": zone,
+                "trend": trend,
+                "time": pd.Timestamp.now().timestamp(),
+                "users": []
+            }
 
-        msg += f"📍 Зона: {round(low,4)} - {round(high,4)}\n\n"
-        msg += f"""💰 Сделка:
-{'📈 ЛОНГ' if trend=='LONG' else '📉 ШОРТ'}
+        exists = any(u["id"] == user.id for u in watchlist[symbol]["users"])
 
-Вход: {round(entry,4)}
-Стоп: {round(stop,4)}
+        if not exists and len(watchlist[symbol]["users"]) < 10:
+            watchlist[symbol]["users"].append({
+                "id": user.id,
+                "username": user.username,
+                "name": user.first_name
+            })
 
-🎯 TP1: {round(tp1,4)}
-🎯 TP2: {round(tp2,4)}
-🎯 TP3: {round(tp3,4)}
-"""
-
-    msg += "\n⚠️ Оценивайте риски\nВход 1-2% от депозита"
+    # ===== MESSAGE =====
+    msg = f"🚀 {symbol}/USDT ({source})\n\n"
+    msg += f"📊 Рынок: {'📈 ЛОНГ' if trend==higher else '⚖️ ФЛЭТ'}\n\n"
 
     await update.message.reply_text(msg)
 
 
-# ================= AUTO SIGNAL =================
-async def scan_market(app):
-    await asyncio.sleep(10)
+# ================= WATCHLIST MONITOR =================
+async def monitor_watchlist(app):
+    await asyncio.sleep(20)
 
     while True:
-        for symbol in SYMBOLS:
+        remove = []
 
-            df, source = get_market(symbol, "15m")
+        for symbol, w in watchlist.items():
+
+            if pd.Timestamp.now().timestamp() - w["time"] > 3600:
+                remove.append(symbol)
+                continue
+
+            df, _ = get_market(symbol, "15m")
             df_h, _ = get_market(symbol, "1h")
 
             if df is None or df_h is None:
@@ -228,93 +213,42 @@ async def scan_market(app):
             df_h = add_indicators(df_h)
 
             trend = get_trend(df)
-            if trend != get_trend(df_h):
+
+            if trend != w["trend"]:
                 continue
 
-            zone = get_zone(df, trend)
-            trade = build_trade(df, trend, zone)
+            entry = confirm_entry(df, w["zone"], trend)
 
-            if not trade:
-                continue
+            if entry:
 
-            entry, stop, tp1, tp2, tp3 = trade
+                mentions = []
+                for u in w["users"]:
+                    if u["username"]:
+                        mentions.append(f"@{u['username']}")
+                    else:
+                        mentions.append(f"<a href='tg://user?id={u['id']}'>{u['name']}</a>")
 
-            trade_id = f"{symbol}_{int(pd.Timestamp.now().timestamp())}"
+                users_text = " ".join(mentions)
 
-            active_trades[trade_id] = {
-                "symbol": symbol,
-                "trend": trend,
-                "entry": entry,
-                "stop": stop,
-                "tp1": tp1,
-                "tp2": tp2,
-                "tp3": tp3
-            }
+                await app.bot.send_message(
+                    chat_id=ALLOWED_CHAT_ID,
+                    text=f"""🔔 {symbol}/USDT
 
-            text = f"""🚨 СИГНАЛ {symbol}
+{users_text}
 
-{'📈 ЛОНГ' if trend=='LONG' else '📉 ШОРТ'}
+Цена пришла в зону и есть подтверждение
 
-Вход: {round(entry,4)}
-Стоп: {round(stop,4)}
+🚨 МОЖНО ВХОДИТЬ
+""",
+                    parse_mode="HTML"
+                )
 
-TP1: {round(tp1,4)}
-TP2: {round(tp2,4)}
-TP3: {round(tp3,4)}
-"""
-
-            await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, text=text)
-
-        await asyncio.sleep(600)
-
-
-# ================= MONITOR =================
-async def monitor_trades(app):
-    await asyncio.sleep(20)
-
-    while True:
-        remove = []
-
-        for tid, t in active_trades.items():
-
-            df, _ = get_market(t["symbol"], "1m")
-            if df is None:
-                continue
-
-            price = df["close"].iloc[-1]
-
-            if t["trend"] == "LONG":
-
-                if price <= t["stop"]:
-                    stats["total"] += 1
-                    stats["loss"] += 1
-                    await app.bot.send_message(ALLOWED_CHAT_ID, f"❌ {t['symbol']} SL")
-                    remove.append(tid)
-
-                elif price >= t["tp3"]:
-                    stats["total"] += 1
-                    stats["win"] += 1
-                    await app.bot.send_message(ALLOWED_CHAT_ID, f"✅ {t['symbol']} TP3 🚀")
-                    remove.append(tid)
-
-            else:
-
-                if price >= t["stop"]:
-                    stats["total"] += 1
-                    stats["loss"] += 1
-                    await app.bot.send_message(ALLOWED_CHAT_ID, f"❌ {t['symbol']} SL")
-                    remove.append(tid)
-
-                elif price <= t["tp3"]:
-                    stats["total"] += 1
-                    stats["win"] += 1
-                    await app.bot.send_message(ALLOWED_CHAT_ID, f"✅ {t['symbol']} TP3 🚀")
-                    remove.append(tid)
+                remove.append(symbol)
 
         for r in remove:
-            active_trades.pop(r, None)
+            watchlist.pop(r, None)
 
-        await asyncio.sleep(30)
+        await asyncio.sleep(60)
 
 
 # ================= START =================
@@ -324,8 +258,7 @@ app.add_handler(MessageHandler(filters.TEXT, handle_message))
 
 
 async def on_start(app):
-    asyncio.create_task(scan_market(app))
-    asyncio.create_task(monitor_trades(app))
+    asyncio.create_task(monitor_watchlist(app))
 
 
 app.post_init = on_start
