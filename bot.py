@@ -17,14 +17,12 @@ ALLOWED_CHAT_ID = -1003130189488     # СЮДА ID ГРУППЫ (с минусо
 SYMBOLS = ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "LINK", "AVAX", "MATIC"]
 COOLDOWN_MINUTES = 30
 SIGNAL_LIFETIME_HOURS = 4
-AUTO_EXCHANGE = "binance"
 
 last_signal_time = {}
 last_signal_price = {}
 pending_entries = {}
 
 STATS_FILE = "stats.json"
-AUTO_STATS_FILE = "auto_stats.json"
 
 # ================= ФОРМАТ =================
 def fmt(p):
@@ -72,7 +70,7 @@ def get_zone(df, direction):
     return None
 
 def confirm_entry(df, zone, direction):
-    if not zone: return None
+    if zone is None: return None
     low, high = zone
     last = df.iloc[-1]
     prev = df.iloc[-2]
@@ -97,124 +95,71 @@ def calculate_recommended_leverage(volatility, trends_match):
         base = int(base * 1.1)
     return min(max(base, 1), 20)
 
-# ================= МУЛЬТИБИРЖА =================
+# ================= БИРЖА =================
 def get_binance(symbol, interval):
     try:
         url = f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol}USDT&interval={interval}&limit=150"
         data = requests.get(url, timeout=10).json()
-        if isinstance(data, dict) and 'code' in data: return None
+        if isinstance(data, dict) and 'code' in data:
+            return None
         df = pd.DataFrame(data)[[0,1,2,3,4,5]]
         df.columns = ["time","open","high","low","close","volume"]
         df = df.astype(float)
         df["time"] = pd.to_datetime(df["time"], unit='ms')
         df.set_index("time", inplace=True)
         return df
-    except: return None
+    except Exception:
+        return None
 
-def get_bybit(symbol, interval):
-    try:
-        interval_map = {"1m":"1","5m":"5","15m":"15","1h":"60","4h":"240"}
-        bybit_interval = interval_map.get(interval, "15")
-        url = "https://api.bybit.com/v5/market/kline"
-        params = {"category":"linear","symbol":f"{symbol}USDT","interval":bybit_interval,"limit":150}
-        data = requests.get(url, params=params, timeout=10).json()
-        if data.get("retCode") != 0: return None
-        klines = data["result"]["list"]
-        df = pd.DataFrame(klines, columns=["time","open","high","low","close","volume","turnover"])
-        df = df.astype(float)
-        df["time"] = pd.to_datetime(df["time"].astype(float), unit='ms')
-        df.set_index("time", inplace=True)
-        return df
-    except: return None
-
-def get_okx(symbol, interval):
-    try:
-        interval_map = {"1m":"1m","5m":"5m","15m":"15m","1h":"1H","4h":"4H"}
-        okx_interval = interval_map.get(interval, "15m")
-        url = "https://www.okx.com/api/v5/market/candles"
-        params = {"instId":f"{symbol}-USDT-SWAP","bar":okx_interval,"limit":"150"}
-        data = requests.get(url, params=params, timeout=10).json()
-        if data.get("code") != "0": return None
-        candles = data["data"]
-        df = pd.DataFrame(candles, columns=["time","open","high","low","close","volCcy","vol","volCcyQuote","confirm"])
-        df = df.astype(float)
-        df["time"] = pd.to_datetime(df["time"].astype(float), unit='ms')
-        df.set_index("time", inplace=True)
-        df["volume"] = df["vol"]
-        return df
-    except: return None
-
-def get_market(symbol, tf, exchange="binance"):
-    if exchange == "binance": return get_binance(symbol, tf), "Binance"
-    elif exchange == "bybit": return get_bybit(symbol, tf), "Bybit"
-    elif exchange == "okx": return get_okx(symbol, tf), "OKX"
-    else: return get_binance(symbol, tf), "Binance"
-
-def get_market_multi(symbol, tf, preferred="binance"):
-    exchanges = ["binance","bybit","okx"]
-    if preferred in exchanges:
-        exchanges.remove(preferred)
-        exchanges.insert(0, preferred)
-    for ex in exchanges:
-        df, name = get_market(symbol, tf, ex)
-        if df is not None: return df, name
-    return None, None
-
-# ================= СТАТИСТИКА =================
+# ================= СТАТИСТИКА (ручная) =================
 def load_stats():
     if os.path.exists(STATS_FILE):
-        with open(STATS_FILE, "r") as f: return json.load(f)
+        with open(STATS_FILE, "r") as f:
+            return json.load(f)
     return {"total":0,"tp1":0,"tp2":0,"tp3":0,"sl":0}
-def save_stats(stats):
-    with open(STATS_FILE, "w") as f: json.dump(stats, f)
-stats = load_stats()
 
-def load_auto_stats():
-    if os.path.exists(AUTO_STATS_FILE):
-        with open(AUTO_STATS_FILE, "r") as f: return json.load(f)
-    return {"total":0,"tp1":0,"tp2":0,"tp3":0,"sl":0,"pending":{}}
-def save_auto_stats(stats):
-    with open(AUTO_STATS_FILE, "w") as f: json.dump(stats, f)
-auto_stats = load_auto_stats()
-signal_counter = 0
-def generate_signal_id():
-    global signal_counter
-    signal_counter += 1
-    return int(time.time()*1000)+signal_counter
+def save_stats(stats):
+    with open(STATS_FILE, "w") as f:
+        json.dump(stats, f)
+
+stats = load_stats()
 
 # ================= БЛОК 1: АНАЛИЗ МОНЕТЫ =================
 async def coin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != ALLOWED_CHAT_ID: return
+    if update.effective_chat.id != ALLOWED_CHAT_ID:
+        return
     text = update.message.text.strip()
-    if not text.startswith("/"): return
-    parts = text.split()
-    symbol = parts[0].replace("/", "").upper()
-    preferred_exchange = parts[1].lower() if len(parts) > 1 else "binance"
-    if preferred_exchange not in ["binance","bybit","okx"]: preferred_exchange = "binance"
-    if symbol in ["STATS","EXPORT","HELP","START","AUTOSTATS","ADD","RESET_STATS"]: return
+    if not text.startswith("/"):
+        return
+    symbol = text.replace("/", "").upper()
+    if symbol in ["STATS", "EXPORT", "HELP", "START", "AUTOSTATS", "ADD", "RESET_STATS"]:
+        return
 
-    df, source = get_market_multi(symbol, "15m", preferred_exchange)
-    df_h, _ = get_market_multi(symbol, "1h", preferred_exchange)
-    df_4h, _ = get_market_multi(symbol, "4h", preferred_exchange)
+    df = get_binance(symbol, "15m")
+    df_h = get_binance(symbol, "1h")
+    df_4h = get_binance(symbol, "4h")
+
     if df is None or df_h is None:
-        await update.message.reply_text(f"❌ Монета {symbol} не найдена на {preferred_exchange}")
+        await update.message.reply_text(f"❌ Монета {symbol} не найдена на Binance")
         return
 
     df = add_indicators(df)
     df_h = add_indicators(df_h)
-    df_4h = add_indicators(df_4h)
+    if df_4h is not None:
+        df_4h = add_indicators(df_4h)
 
     trend = get_trend(df)
     trend_h = get_trend(df_h)
-    trend_4h = get_trend(df_4h)
+    trend_4h = get_trend(df_4h) if df_4h is not None else trend
 
     trends_match = sum([trend == trend_h, trend == trend_4h])
     strength_emoji = "🔥🔥🔥" if trends_match == 2 else "🔥🔥" if trends_match == 1 else "🔥"
 
     zone = get_zone(df, trend)
-    if not zone:
+    if zone is None:
         await update.message.reply_text("❌ Нет зоны входа")
         return
+
     low, high = zone
     entry = (low + high) / 2
     atr = df["atr"].iloc[-1]
@@ -246,7 +191,7 @@ async def coin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         now_status = "⏳ ЖДАТЬ (тренды 15m и 1h не совпадают)"
 
-    msg = f"""🚀 {symbol}/USDT ({source})
+    msg = f"""🚀 {symbol}/USDT (Binance)
 
 📊 Рынок: {'📈 ЛОНГ' if trend=='LONG' else '📉 ШОРТ'}
 💪 Сила тренда: {strength_emoji}
@@ -284,8 +229,7 @@ async def coin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pending_entries[symbol] = {
             "zone_low": low, "zone_high": high, "trend": trend,
             "entry": entry, "stop": stop, "tp1": tp1, "tp2": tp2, "tp3": tp3,
-            "chat_id": update.effective_chat.id, "expires_at": expires_at,
-            "exchange": source
+            "chat_id": update.effective_chat.id, "expires_at": expires_at
         }
         await update.message.reply_text(f"🔄 Буду следить за {symbol} до входа в зону.")
 
@@ -297,8 +241,9 @@ async def check_entries(app):
             if time.time() > data["expires_at"]:
                 del pending_entries[symbol]
                 continue
-            df, _ = get_market(symbol, "15m", "binance")
-            if df is None: continue
+            df = get_binance(symbol, "15m")
+            if df is None:
+                continue
             df = add_indicators(df)
             current_trend = get_trend(df)
             if current_trend != data["trend"]:
@@ -328,193 +273,19 @@ async def check_entries(app):
                 del pending_entries[symbol]
         await asyncio.sleep(60)
 
-# ================= БЛОК 3: АВТОСИГНАЛЫ =================
-async def scan_market(app):
-    await asyncio.sleep(30)
-    while True:
-        for symbol in SYMBOLS:
-            try:
-                df, source = get_market_multi(symbol, "15m", AUTO_EXCHANGE)
-                df_h, _ = get_market_multi(symbol, "1h", AUTO_EXCHANGE)
-                df_4h, _ = get_market_multi(symbol, "4h", AUTO_EXCHANGE)
-                if None in (df, df_h, df_4h): continue
-
-                df = add_indicators(df)
-                df_h = add_indicators(df_h)
-                df_4h = add_indicators(df_4h)
-
-                trend = get_trend(df)
-                trend_h = get_trend(df_h)
-                trend_4h = get_trend(df_4h)
-                if trend != trend_h: continue
-
-                trends_match = sum([trend == trend_h, trend == trend_4h])
-                if trends_match == 2:
-                    strength = "🔥🔥🔥 СИЛЬНЫЙ (3/3)"
-                    strength_score = 3
-                    min_vol_ratio = 1.3
-                elif trends_match == 1:
-                    strength = "🔥🔥 СРЕДНИЙ (2/3)"
-                    strength_score = 2
-                    min_vol_ratio = 1.5
-                else:
-                    strength = "🔥 СЛАБЫЙ (1/3)"
-                    strength_score = 1
-                    min_vol_ratio = 2.0
-
-                zone = get_zone(df, trend)
-                if not zone: continue
-                entry_confirm = confirm_entry(df, zone, trend)
-                if not entry_confirm: continue
-
-                now = time.time()
-                if symbol in last_signal_time and now - last_signal_time[symbol] < COOLDOWN_MINUTES * 60:
-                    continue
-                current_price = df["close"].iloc[-1]
-                if symbol in last_signal_price:
-                    price_change = abs(current_price - last_signal_price[symbol]) / last_signal_price[symbol] * 100
-                    if price_change < 0.5:  # 0.5% фильтр
-                        continue
-
-                avg_volume = df["volume"].tail(20).mean()
-                curr_vol = df["volume"].iloc[-1]
-                if curr_vol < avg_volume * min_vol_ratio: continue
-
-                low, high = zone
-                entry_price = (low + high) / 2
-                atr = df["atr"].iloc[-1]
-                if trend == "LONG":
-                    stop = low - atr * 1.2
-                    risk = entry_price - stop
-                    tp1 = entry_price + risk
-                    tp2 = entry_price + risk * 2
-                    tp3 = entry_price + risk * 3   # для автосигналов ×3
-                else:
-                    stop = high + atr * 1.2
-                    risk = stop - entry_price
-                    tp1 = entry_price - risk
-                    tp2 = entry_price - risk * 2
-                    tp3 = entry_price - risk * 3
-
-                signal_id = generate_signal_id()
-                auto_stats["pending"][signal_id] = {
-                    "symbol": symbol, "entry": entry_price, "stop": stop, "trend": trend,
-                    "timestamp": now, "signal_time": now, "strength": strength_score
-                }
-                save_auto_stats(auto_stats)
-
-                last_signal_time[symbol] = now
-                last_signal_price[symbol] = current_price
-
-                await app.bot.send_message(
-                    chat_id=ALLOWED_CHAT_ID,
-                    text=f"""🚨 АВТОСИГНАЛ! {symbol}/USDT 🚨
-
-📍 Источник: {source}
-📊 Тренд: {'📈 ЛОНГ' if trend=='LONG' else '📉 ШОРТ'}
-💪 Сила сигнала: {strength}
-
-✅ ТОЧКА ВХОДА!
-
-💰 Вход: {fmt(entry_price)}
-⚠️ Стоп: {fmt(stop)}
-
-🎯 TP1: {fmt(tp1)}
-🎯 TP2: {fmt(tp2)}
-🎯 TP3: {fmt(tp3)}
-
-📊 Объём: +{((curr_vol/avg_volume)-1)*100:.0f}%
-🆔 ID: {signal_id}
-
-⚡ ДЕЙСТВУЙ!
-"""
-                )
-                await asyncio.sleep(2)
-            except Exception as e:
-                print(f"Ошибка {symbol}: {e}")
-        await asyncio.sleep(180)
-
-# ================= АВТОСТАТИСТИКА =================
-async def check_signal_result(app):
-    await asyncio.sleep(60)
-    while True:
-        now = time.time()
-        for sid, data in list(auto_stats.get("pending", {}).items()):
-            symbol = data["symbol"]
-            entry = data["entry"]
-            stop = data["stop"]
-            trend = data["trend"]
-            signal_time = data.get("signal_time", data["timestamp"])
-            if now - signal_time > 86400:  # 24 часа
-                del auto_stats["pending"][sid]
-                save_auto_stats(auto_stats)
-                continue
-            df, _ = get_market(symbol, "1h", AUTO_EXCHANGE)
-            if df is None: continue
-            df = add_indicators(df)
-            current_price = df["close"].iloc[-1]
-            if trend == "LONG":
-                tp1 = entry + (entry - stop)
-                tp2 = entry + (entry - stop) * 2
-                tp3 = entry + (entry - stop) * 3
-                if current_price >= tp3:
-                    auto_stats["tp3"] += 1
-                    auto_stats["total"] += 1
-                    await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, text=f"🎯 АВТОСИГНАЛ {symbol} ДОСТИГ TP3!\n💰 Вход: {fmt(entry)} → {fmt(current_price)}")
-                    del auto_stats["pending"][sid]
-                elif current_price >= tp2:
-                    auto_stats["tp2"] += 1
-                    auto_stats["total"] += 1
-                    await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, text=f"🎯 АВТОСИГНАЛ {symbol} ДОСТИГ TP2!\n💰 Вход: {fmt(entry)} → {fmt(current_price)}")
-                    del auto_stats["pending"][sid]
-                elif current_price >= tp1:
-                    auto_stats["tp1"] += 1
-                    auto_stats["total"] += 1
-                    await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, text=f"🎯 АВТОСИГНАЛ {symbol} ДОСТИГ TP1!\n💰 Вход: {fmt(entry)} → {fmt(current_price)}")
-                    del auto_stats["pending"][sid]
-                elif current_price <= stop:
-                    auto_stats["sl"] += 1
-                    auto_stats["total"] += 1
-                    await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, text=f"❌ АВТОСИГНАЛ {symbol} СРАБОТАЛ СТОП!\n💰 Вход: {fmt(entry)} → {fmt(current_price)}")
-                    del auto_stats["pending"][sid]
-            else:  # SHORT
-                tp1 = entry - (stop - entry)
-                tp2 = entry - (stop - entry) * 2
-                tp3 = entry - (stop - entry) * 3
-                if current_price <= tp3:
-                    auto_stats["tp3"] += 1
-                    auto_stats["total"] += 1
-                    await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, text=f"🎯 АВТОСИГНАЛ {symbol} ДОСТИГ TP3!\n💰 Вход: {fmt(entry)} → {fmt(current_price)}")
-                    del auto_stats["pending"][sid]
-                elif current_price <= tp2:
-                    auto_stats["tp2"] += 1
-                    auto_stats["total"] += 1
-                    await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, text=f"🎯 АВТОСИГНАЛ {symbol} ДОСТИГ TP2!\n💰 Вход: {fmt(entry)} → {fmt(current_price)}")
-                    del auto_stats["pending"][sid]
-                elif current_price <= tp1:
-                    auto_stats["tp1"] += 1
-                    auto_stats["total"] += 1
-                    await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, text=f"🎯 АВТОСИГНАЛ {symbol} ДОСТИГ TP1!\n💰 Вход: {fmt(entry)} → {fmt(current_price)}")
-                    del auto_stats["pending"][sid]
-                elif current_price >= stop:
-                    auto_stats["sl"] += 1
-                    auto_stats["total"] += 1
-                    await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, text=f"❌ АВТОСИГНАЛ {symbol} СРАБОТАЛ СТОП!\n💰 Вход: {fmt(entry)} → {fmt(current_price)}")
-                    del auto_stats["pending"][sid]
-            save_auto_stats(auto_stats)
-        await asyncio.sleep(300)
-
 # ================= КОМАНДЫ =================
 async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != ALLOWED_CHAT_ID: return
+    if update.effective_chat.id != ALLOWED_CHAT_ID:
+        return
     if stats["total"] == 0:
         await update.message.reply_text("📊 Нет данных по сделкам")
         return
     t = stats["total"]
+    winrate = (stats['tp1']+stats['tp2']+stats['tp3'])/t*100
     msg = f"""📊 СТАТИСТИКА СИГНАЛОВ
 ━━━━━━━━━━━━━━━━━━━
 📈 Всего: {t}
-✅ Винрейт: {(stats['tp1']+stats['tp2']+stats['tp3'])/t*100:.1f}%
+✅ Винрейт: {winrate:.1f}%
 🎯 TP1: {stats['tp1']} ({stats['tp1']/t*100:.1f}%)
 🎯 TP2: {stats['tp2']} ({stats['tp2']/t*100:.1f}%)
 🎯 TP3: {stats['tp3']} ({stats['tp3']/t*100:.1f}%)
@@ -522,7 +293,8 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg)
 
 async def add_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != ALLOWED_CHAT_ID: return
+    if update.effective_chat.id != ALLOWED_CHAT_ID:
+        return
     args = context.args
     if len(args) != 2:
         await update.message.reply_text("❌ Использование: /add TP1 BTC")
@@ -553,43 +325,28 @@ async def add_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await stats_cmd(update, context)
 
 async def export_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != ALLOWED_CHAT_ID: return
+    if update.effective_chat.id != ALLOWED_CHAT_ID:
+        return
     if os.path.exists(STATS_FILE):
         await update.message.reply_document(document=open(STATS_FILE,"rb"), filename="stats.json")
     else:
         await update.message.reply_text("Нет файла")
 
 async def reset_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != ALLOWED_CHAT_ID: return
+    if update.effective_chat.id != ALLOWED_CHAT_ID:
+        return
     global stats
     stats = {"total":0,"tp1":0,"tp2":0,"tp3":0,"sl":0}
     save_stats(stats)
     await update.message.reply_text("🗑 Статистика сброшена!")
 
-async def auto_stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != ALLOWED_CHAT_ID: return
-    total = auto_stats["total"]
-    if total == 0:
-        await update.message.reply_text("🤖 Нет автосигналов")
-        return
-    msg = f"""🤖 СТАТИСТИКА АВТОСИГНАЛОВ
-━━━━━━━━━━━━━━━━━━━
-📈 Всего: {total}
-✅ Винрейт: {(auto_stats['tp1']+auto_stats['tp2']+auto_stats['tp3'])/total*100:.1f}%
-⏳ Активных: {len(auto_stats.get('pending',{}))}
-🎯 TP1: {auto_stats['tp1']} ({auto_stats['tp1']/total*100:.1f}%)
-🎯 TP2: {auto_stats['tp2']} ({auto_stats['tp2']/total*100:.1f}%)
-🎯 TP3: {auto_stats['tp3']} ({auto_stats['tp3']/total*100:.1f}%)
-❌ SL: {auto_stats['sl']} ({auto_stats['sl']/total*100:.1f}%)"""
-    await update.message.reply_text(msg)
-
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != ALLOWED_CHAT_ID: return
+    if update.effective_chat.id != ALLOWED_CHAT_ID:
+        return
     await update.message.reply_text(
         "📚 КОМАНДЫ БОТА\n\n"
         "/BTC (или любая монета) - анализ\n"
         "/stats - статистика ручных сигналов\n"
-        "/autostats - статистика автосигналов\n"
         "/add TP1 BTC - добавить результат\n"
         "/export - выгрузить stats.json\n"
         "/reset_stats - сбросить ручную статистику\n"
@@ -597,7 +354,8 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != ALLOWED_CHAT_ID: return
+    if update.effective_chat.id != ALLOWED_CHAT_ID:
+        return
     await help_cmd(update, context)
 
 # ================= ЗАПУСК =================
@@ -605,17 +363,17 @@ app = ApplicationBuilder().token(TOKEN).build()
 app.add_handler(CommandHandler("start", start_cmd))
 app.add_handler(CommandHandler("help", help_cmd))
 app.add_handler(CommandHandler("stats", stats_cmd))
-app.add_handler(CommandHandler("autostats", auto_stats_cmd))
 app.add_handler(CommandHandler("add", add_result))
 app.add_handler(CommandHandler("export", export_cmd))
 app.add_handler(CommandHandler("reset_stats", reset_stats))
 app.add_handler(MessageHandler(filters.COMMAND, coin_handler))
 
 async def on_start(app):
-    await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, text="🤖 Бот запущен! Автосигналы активны.")
-    asyncio.create_task(scan_market(app))
+    await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, text="🤖 Бот запущен! Анализ и отслеживание активны.")
     asyncio.create_task(check_entries(app))
-    asyncio.create_task(check_signal_result(app))
+    # Автосигналы и автостатистика временно отключены для стабильности
+    # asyncio.create_task(scan_market(app))
+    # asyncio.create_task(check_signal_result(app))
 
 app.post_init = on_start
 
