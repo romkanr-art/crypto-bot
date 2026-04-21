@@ -17,7 +17,7 @@ ALLOWED_CHAT_ID = -1003130189488     # СЮДА ID ГРУППЫ (с минусо
 SYMBOLS = ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "LINK", "AVAX", "MATIC"]
 COOLDOWN_MINUTES = 30
 SIGNAL_LIFETIME_HOURS = 4
-AUTO_EXCHANGE = "binance"            # для автосигналов
+AUTO_EXCHANGE = "binance"
 
 last_signal_time = {}
 last_signal_price = {}
@@ -97,7 +97,7 @@ def calculate_recommended_leverage(volatility, trends_match):
         base = int(base * 1.1)
     return min(max(base, 1), 20)
 
-# ================= МУЛЬТИБИРЖА (только для ручного анализа) =================
+# ================= МУЛЬТИБИРЖА =================
 def get_binance(symbol, interval):
     try:
         url = f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol}USDT&interval={interval}&limit=150"
@@ -171,7 +171,7 @@ def get_market_multi(symbol, tf, preferred="binance"):
             return df, name
     return None, None
 
-# ================= СТАТИСТИКА (ручная) =================
+# ================= СТАТИСТИКА =================
 def load_stats():
     if os.path.exists(STATS_FILE):
         with open(STATS_FILE, "r") as f:
@@ -184,7 +184,6 @@ def save_stats(stats):
 
 stats = load_stats()
 
-# ================= АВТОСТАТИСТИКА =================
 def load_auto_stats():
     if os.path.exists(AUTO_STATS_FILE):
         with open(AUTO_STATS_FILE, "r") as f:
@@ -273,9 +272,13 @@ async def coin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         now_status = "⏳ ЖДАТЬ (тренды 15m и 1h не совпадают)"
 
+    # Добавляем строку с отдельными трендами
+    trend_line = f"📈 Тренды: 15m {trend} | 1h {trend_h} | 4h {trend_4h}"
+
     msg = f"""🚀 {symbol}/USDT ({source})
 
 📊 Рынок: {'📈 ЛОНГ' if trend=='LONG' else '📉 ШОРТ'}
+{trend_line}
 💪 Сила тренда: {strength_emoji}
 
 💧 Ликвидность:
@@ -301,7 +304,7 @@ async def coin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 🦿 Рекомендуемое плечо: {rec_leverage}x
 
-⚠️ Вход 1-2% от депозита
+⚠️ Вход не более 1-2% от депозита. Оценивайте свои финансовые риски.
 """
     await update.message.reply_text(msg)
 
@@ -332,7 +335,7 @@ async def check_entries(app):
             if current_trend != data["trend"]:
                 await app.bot.send_message(
                     chat_id=data["chat_id"],
-                    text=f"⚠️ Тренд изменился! {symbol}\nБыл: {'📈 ЛОНГ' if data['trend']=='LONG' else '📉 ШОРТ'}\nСтал: {'📈 ЛОНГ' if current_trend=='LONG' else '📉 ШОРТ'}\nНапишите /{symbol} для нового анализа"
+                    text=f"⚠️ Тренд на 15m изменился! {symbol}\nБыл: {'📈 ЛОНГ' if data['trend']=='LONG' else '📉 ШОРТ'}\nСтал: {'📈 ЛОНГ' if current_trend=='LONG' else '📉 ШОРТ'}\nНапишите /{symbol} для нового анализа"
                 )
                 del pending_entries[symbol]
                 continue
@@ -350,7 +353,7 @@ async def check_entries(app):
 🎯 Вход: {fmt(data['entry'])} | Стоп: {fmt(data['stop'])}
 🎯 TP1: {fmt(data['tp1'])} | TP2: {fmt(data['tp2'])} | TP3: {fmt(data['tp3'])}
 
-⚡ ДЕЙСТВУЙ!
+⚠️ Вход не более 1-2% от депозита. Оценивайте свои финансовые риски.
 """
                 )
                 del pending_entries[symbol]
@@ -459,7 +462,7 @@ async def scan_market(app):
 📊 Объём: +{((curr_vol/avg_volume)-1)*100:.0f}%
 🆔 ID: {signal_id}
 
-⚡ ДЕЙСТВУЙ!
+⚠️ Вход не более 1-2% от депозита. Оценивайте свои финансовые риски.
 """
                 )
                 await asyncio.sleep(2)
