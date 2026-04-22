@@ -202,7 +202,7 @@ def generate_signal_id():
     signal_counter += 1
     return int(time.time()*1000) + signal_counter
 
-# ================= БЛОК 1: АНАЛИЗ МОНЕТЫ =================
+# ================= БЛОК 1: АНАЛИЗ МОНЕТЫ (без изменений) =================
 async def coin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.id != ALLOWED_CHAT_ID:
         return
@@ -246,6 +246,7 @@ async def coin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     entry = (low + high) / 2
     atr = df["atr"].iloc[-1]
 
+    # Ручной анализ: стоп и тейки остаются как были (risk*1, risk*2, risk*4)
     if trend == "LONG":
         stop = low - atr * 1.2
         risk = entry - stop
@@ -272,7 +273,6 @@ async def coin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         now_status = "⏳ ЖДАТЬ (тренды 15m и 1h не совпадают)"
 
-    # Добавляем строку с отдельными трендами
     trend_line = f"📈 Тренды: 15m {trend} | 1h {trend_h} | 4h {trend_4h}"
 
     msg = f"""🚀 {symbol}/USDT ({source})
@@ -319,7 +319,7 @@ async def coin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
         await update.message.reply_text(f"🔄 Буду следить за {symbol} до входа в зону.")
 
-# ================= БЛОК 2: ФОНОВАЯ ПРОВЕРКА ВХОДОВ =================
+# ================= БЛОК 2: ФОНОВАЯ ПРОВЕРКА ВХОДОВ (без изменений) =================
 async def check_entries(app):
     await asyncio.sleep(30)
     while True:
@@ -359,7 +359,7 @@ async def check_entries(app):
                 del pending_entries[symbol]
         await asyncio.sleep(60)
 
-# ================= БЛОК 3: АВТОСИГНАЛЫ =================
+# ================= БЛОК 3: АВТОСИГНАЛЫ (ИЗМЕНЁННЫЕ ПАРАМЕТРЫ) =================
 async def scan_market(app):
     await asyncio.sleep(30)
     while True:
@@ -419,18 +419,20 @@ async def scan_market(app):
                 low, high = zone
                 entry_price = (low + high) / 2
                 atr = df["atr"].iloc[-1]
+
+                # НОВЫЕ ПАРАМЕТРЫ ДЛЯ АВТОСИГНАЛОВ (лонг и шорт)
                 if trend == "LONG":
-                    stop = low - atr * 1.2
+                    stop = low - atr * 2.0
                     risk = entry_price - stop
-                    tp1 = entry_price + risk
-                    tp2 = entry_price + risk * 2
-                    tp3 = entry_price + risk * 3   # для автосигналов ×3
+                    tp1 = entry_price + risk * 1.5
+                    tp2 = entry_price + risk * 2.5
+                    tp3 = entry_price + risk * 4.0
                 else:
-                    stop = high + atr * 1.2
+                    stop = high + atr * 2.0
                     risk = stop - entry_price
-                    tp1 = entry_price - risk
-                    tp2 = entry_price - risk * 2
-                    tp3 = entry_price - risk * 3
+                    tp1 = entry_price - risk * 1.5
+                    tp2 = entry_price - risk * 2.5
+                    tp3 = entry_price - risk * 4.0
 
                 signal_id = generate_signal_id()
                 auto_stats["pending"][signal_id] = {
@@ -470,7 +472,7 @@ async def scan_market(app):
                 print(f"Ошибка {symbol}: {e}")
         await asyncio.sleep(180)
 
-# ================= АВТОМАТИЧЕСКОЕ ОТСЛЕЖИВАНИЕ РЕЗУЛЬТАТОВ АВТОСИГНАЛОВ =================
+# ================= АВТОМАТИЧЕСКОЕ ОТСЛЕЖИВАНИЕ РЕЗУЛЬТАТОВ (синхронизировано с новыми целями) =================
 async def check_signal_result(app):
     await asyncio.sleep(60)
     while True:
@@ -481,7 +483,7 @@ async def check_signal_result(app):
             stop = data["stop"]
             trend = data["trend"]
             signal_time = data.get("signal_time", data["timestamp"])
-            if now - signal_time > 86400:  # 24 часа
+            if now - signal_time > 86400:
                 del auto_stats["pending"][sid]
                 save_auto_stats(auto_stats)
                 continue
@@ -493,9 +495,10 @@ async def check_signal_result(app):
             current_price = df["close"].iloc[-1]
 
             if trend == "LONG":
-                tp1 = entry + (entry - stop)
-                tp2 = entry + (entry - stop) * 2
-                tp3 = entry + (entry - stop) * 3
+                # Цели должны совпадать с отправленными в сигнале
+                tp1 = entry + (entry - stop) * 1.5
+                tp2 = entry + (entry - stop) * 2.5
+                tp3 = entry + (entry - stop) * 4.0
                 if current_price >= tp3:
                     auto_stats["tp3"] += 1
                     auto_stats["total"] += 1
@@ -517,9 +520,9 @@ async def check_signal_result(app):
                     await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, text=f"❌ АВТОСИГНАЛ {symbol} СРАБОТАЛ СТОП!\n💰 Вход: {fmt(entry)} → {fmt(current_price)}")
                     del auto_stats["pending"][sid]
             else:  # SHORT
-                tp1 = entry - (stop - entry)
-                tp2 = entry - (stop - entry) * 2
-                tp3 = entry - (stop - entry) * 3
+                tp1 = entry - (stop - entry) * 1.5
+                tp2 = entry - (stop - entry) * 2.5
+                tp3 = entry - (stop - entry) * 4.0
                 if current_price <= tp3:
                     auto_stats["tp3"] += 1
                     auto_stats["total"] += 1
@@ -649,7 +652,7 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await help_cmd(update, context)
 
 # ================= ЗАПУСК =================
-app = ApplicationBuilder().token(TOKEN).build()
+app = ApplicationBuilder().token(TOKEN).connect_timeout(30).read_timeout(30).build()
 app.add_handler(CommandHandler("start", start_cmd))
 app.add_handler(CommandHandler("help", help_cmd))
 app.add_handler(CommandHandler("stats", stats_cmd))
