@@ -11,9 +11,8 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, filters, ContextTypes
 
 # ================= КОНФИГУРАЦИЯ =================
-TOKEN = "8577341778:AAG1vhEXlACi-cdXSpcSpgDtDsJug_F1lIg"           # СЮДА ВСТАВЬ ТОКЕН
-ALLOWED_CHAT_ID = -1003130189488      # СЮДА ID ГРУППЫ (с минусом)
-TOPIC_ID = None                       # СНАЧАЛА ОСТАВЬТЕ None, ПОТОМ ЗАМЕНИТЕ НА ЧИСЛО
+TOKEN = "8577341778:AAG1vhEXlACi-cdXSpcSpgDtDsJug_F1lIg"
+ALLOWED_CHAT_ID = -1003130189488
 
 SYMBOLS = ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "LINK", "AVAX", "MATIC"]
 COOLDOWN_MINUTES = 30
@@ -203,7 +202,7 @@ def generate_signal_id():
     signal_counter += 1
     return int(time.time()*1000) + signal_counter
 
-# ================= БЛОК 1: АНАЛИЗ МОНЕТЫ =================
+# ================= БЛОК 1: АНАЛИЗ =================
 async def coin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.id != ALLOWED_CHAT_ID:
         return
@@ -215,7 +214,7 @@ async def coin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     preferred_exchange = parts[1].lower() if len(parts) > 1 else "binance"
     if preferred_exchange not in ["binance","bybit","okx"]:
         preferred_exchange = "binance"
-    if symbol in ["STATS","EXPORT","HELP","START","AUTOSTATS","ADD","RESET_STATS","GET_TOPIC_ID"]:
+    if symbol in ["STATS","EXPORT","HELP","START","AUTOSTATS","ADD","RESET_STATS"]:
         return
 
     df, source = get_market_multi(symbol, "15m", preferred_exchange)
@@ -306,8 +305,7 @@ async def coin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 ⚠️ Вход не более 1-2% от депозита. Оценивайте свои финансовые риски.
 """
-    # Отправляем ответ в ту же тему, откуда пришла команда (если это тема)
-    await update.message.reply_text(msg, message_thread_id=update.effective_message.message_thread_id)
+    await update.message.reply_text(msg)
 
     if not status:
         expires_at = time.time() + SIGNAL_LIFETIME_HOURS * 3600
@@ -315,11 +313,10 @@ async def coin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "zone_low": low, "zone_high": high, "trend": trend,
             "entry": entry, "stop": stop, "tp1": tp1, "tp2": tp2, "tp3": tp3,
             "chat_id": update.effective_chat.id,
-            "thread_id": update.effective_message.message_thread_id,
             "expires_at": expires_at,
             "exchange": source
         }
-        await update.message.reply_text(f"🔄 Буду следить за {symbol} до входа в зону.", message_thread_id=update.effective_message.message_thread_id)
+        await update.message.reply_text(f"🔄 Буду следить за {symbol} до входа в зону.")
 
 # ================= БЛОК 2: ОТСЛЕЖИВАНИЕ ВХОДА =================
 async def check_entries(app):
@@ -337,7 +334,6 @@ async def check_entries(app):
             if current_trend != data["trend"]:
                 await app.bot.send_message(
                     chat_id=data["chat_id"],
-                    message_thread_id=data["thread_id"],
                     text=f"⚠️ Тренд на 15m изменился! {symbol}\nБыл: {'📈 ЛОНГ' if data['trend']=='LONG' else '📉 ШОРТ'}\nСтал: {'📈 ЛОНГ' if current_trend=='LONG' else '📉 ШОРТ'}\nНапишите /{symbol} для нового анализа"
                 )
                 del pending_entries[symbol]
@@ -346,7 +342,6 @@ async def check_entries(app):
             if data["zone_low"] <= current_price <= data["zone_high"]:
                 await app.bot.send_message(
                     chat_id=data["chat_id"],
-                    message_thread_id=data["thread_id"],
                     text=f"""🚨 СИГНАЛ! {symbol}/USDT 🚨
 
 ✅ ЦЕНА ВОШЛА В ЗОНУ!
@@ -447,12 +442,9 @@ async def scan_market(app):
                 last_signal_time[symbol] = now
                 last_signal_price[symbol] = current_price
 
-                # Отправляем в тему, если TOPIC_ID задан, иначе в общий чат
-                if TOPIC_ID is not None:
-                    await app.bot.send_message(
-                        chat_id=ALLOWED_CHAT_ID,
-                        message_thread_id=TOPIC_ID,
-                        text=f"""🚨 АВТОСИГНАЛ! {symbol}/USDT 🚨
+                await app.bot.send_message(
+                    chat_id=ALLOWED_CHAT_ID,
+                    text=f"""🚨 АВТОСИГНАЛ! {symbol}/USDT 🚨
 
 📍 Источник: {source}
 📊 Тренд: {'📈 ЛОНГ' if trend=='LONG' else '📉 ШОРТ'}
@@ -472,31 +464,7 @@ async def scan_market(app):
 
 ⚠️ Вход не более 1-2% от депозита. Оценивайте свои финансовые риски.
 """
-                    )
-                else:
-                    await app.bot.send_message(
-                        chat_id=ALLOWED_CHAT_ID,
-                        text=f"""🚨 АВТОСИГНАЛ! {symbol}/USDT 🚨
-
-📍 Источник: {source}
-📊 Тренд: {'📈 ЛОНГ' if trend=='LONG' else '📉 ШОРТ'}
-💪 Сила сигнала: {strength}
-
-✅ ТОЧКА ВХОДА!
-
-💰 Вход: {fmt(entry_price)}
-⚠️ Стоп: {fmt(stop)}
-
-🎯 TP1: {fmt(tp1)}
-🎯 TP2: {fmt(tp2)}
-🎯 TP3: {fmt(tp3)}
-
-📊 Объём: +{((curr_vol/avg_volume)-1)*100:.0f}%
-🆔 ID: {signal_id}
-
-⚠️ Вход не более 1-2% от депозита. Оценивайте свои финансовые риски.
-"""
-                    )
+                )
                 await asyncio.sleep(2)
             except Exception as e:
                 print(f"Ошибка {symbol}: {e}")
@@ -531,22 +499,22 @@ async def check_signal_result(app):
                 if current_price >= tp3:
                     auto_stats["tp3"] += 1
                     auto_stats["total"] += 1
-                    await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, message_thread_id=TOPIC_ID if TOPIC_ID else None, text=f"🎯 АВТОСИГНАЛ {symbol} ДОСТИГ TP3!\n💰 Вход: {fmt(entry)} → {fmt(current_price)}")
+                    await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, text=f"🎯 АВТОСИГНАЛ {symbol} ДОСТИГ TP3!\n💰 Вход: {fmt(entry)} → {fmt(current_price)}")
                     del auto_stats["pending"][sid]
                 elif current_price >= tp2:
                     auto_stats["tp2"] += 1
                     auto_stats["total"] += 1
-                    await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, message_thread_id=TOPIC_ID if TOPIC_ID else None, text=f"🎯 АВТОСИГНАЛ {symbol} ДОСТИГ TP2!\n💰 Вход: {fmt(entry)} → {fmt(current_price)}")
+                    await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, text=f"🎯 АВТОСИГНАЛ {symbol} ДОСТИГ TP2!\n💰 Вход: {fmt(entry)} → {fmt(current_price)}")
                     del auto_stats["pending"][sid]
                 elif current_price >= tp1:
                     auto_stats["tp1"] += 1
                     auto_stats["total"] += 1
-                    await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, message_thread_id=TOPIC_ID if TOPIC_ID else None, text=f"🎯 АВТОСИГНАЛ {symbol} ДОСТИГ TP1!\n💰 Вход: {fmt(entry)} → {fmt(current_price)}")
+                    await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, text=f"🎯 АВТОСИГНАЛ {symbol} ДОСТИГ TP1!\n💰 Вход: {fmt(entry)} → {fmt(current_price)}")
                     del auto_stats["pending"][sid]
                 elif current_price <= stop:
                     auto_stats["sl"] += 1
                     auto_stats["total"] += 1
-                    await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, message_thread_id=TOPIC_ID if TOPIC_ID else None, text=f"❌ АВТОСИГНАЛ {symbol} СРАБОТАЛ СТОП!\n💰 Вход: {fmt(entry)} → {fmt(current_price)}")
+                    await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, text=f"❌ АВТОСИГНАЛ {symbol} СРАБОТАЛ СТОП!\n💰 Вход: {fmt(entry)} → {fmt(current_price)}")
                     del auto_stats["pending"][sid]
             else:
                 tp1 = entry - (stop - entry) * 1.5
@@ -555,39 +523,29 @@ async def check_signal_result(app):
                 if current_price <= tp3:
                     auto_stats["tp3"] += 1
                     auto_stats["total"] += 1
-                    await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, message_thread_id=TOPIC_ID if TOPIC_ID else None, text=f"🎯 АВТОСИГНАЛ {symbol} ДОСТИГ TP3!\n💰 Вход: {fmt(entry)} → {fmt(current_price)}")
+                    await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, text=f"🎯 АВТОСИГНАЛ {symbol} ДОСТИГ TP3!\n💰 Вход: {fmt(entry)} → {fmt(current_price)}")
                     del auto_stats["pending"][sid]
                 elif current_price <= tp2:
                     auto_stats["tp2"] += 1
                     auto_stats["total"] += 1
-                    await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, message_thread_id=TOPIC_ID if TOPIC_ID else None, text=f"🎯 АВТОСИГНАЛ {symbol} ДОСТИГ TP2!\n💰 Вход: {fmt(entry)} → {fmt(current_price)}")
+                    await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, text=f"🎯 АВТОСИГНАЛ {symbol} ДОСТИГ TP2!\n💰 Вход: {fmt(entry)} → {fmt(current_price)}")
                     del auto_stats["pending"][sid]
                 elif current_price <= tp1:
                     auto_stats["tp1"] += 1
                     auto_stats["total"] += 1
-                    await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, message_thread_id=TOPIC_ID if TOPIC_ID else None, text=f"🎯 АВТОСИГНАЛ {symbol} ДОСТИГ TP1!\n💰 Вход: {fmt(entry)} → {fmt(current_price)}")
+                    await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, text=f"🎯 АВТОСИГНАЛ {symbol} ДОСТИГ TP1!\n💰 Вход: {fmt(entry)} → {fmt(current_price)}")
                     del auto_stats["pending"][sid]
                 elif current_price >= stop:
                     auto_stats["sl"] += 1
                     auto_stats["total"] += 1
-                    await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, message_thread_id=TOPIC_ID if TOPIC_ID else None, text=f"❌ АВТОСИГНАЛ {symbol} СРАБОТАЛ СТОП!\n💰 Вход: {fmt(entry)} → {fmt(current_price)}")
+                    await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, text=f"❌ АВТОСИГНАЛ {symbol} СРАБОТАЛ СТОП!\n💰 Вход: {fmt(entry)} → {fmt(current_price)}")
                     del auto_stats["pending"][sid]
             save_auto_stats(auto_stats)
         await asyncio.sleep(300)
 
 # ================= КОМАНДЫ =================
-async def get_topic_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != ALLOWED_CHAT_ID:
-        await update.message.reply_text("❌ Недостаточно прав.")
-        return
-    if update.effective_message.message_thread_id:
-        await update.message.reply_text(f"🆔 ID этой темы: `{update.effective_message.message_thread_id}`")
-    else:
-        await update.message.reply_text("ℹ️ Эта команда работает только в темах (не в общем чате).")
-
 async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != ALLOWED_CHAT_ID:
-        return
+    if update.effective_chat.id != ALLOWED_CHAT_ID: return
     if stats["total"] == 0:
         await update.message.reply_text("📊 Нет данных по сделкам")
         return
@@ -601,11 +559,10 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🎯 TP2: {stats['tp2']} ({stats['tp2']/t*100:.1f}%)
 🎯 TP3: {stats['tp3']} ({stats['tp3']/t*100:.1f}%)
 ❌ SL: {stats['sl']} ({stats['sl']/t*100:.1f}%)"""
-    await update.message.reply_text(msg, message_thread_id=update.effective_message.message_thread_id)
+    await update.message.reply_text(msg)
 
 async def add_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != ALLOWED_CHAT_ID:
-        return
+    if update.effective_chat.id != ALLOWED_CHAT_ID: return
     args = context.args
     if len(args) != 2:
         await update.message.reply_text("❌ Использование: /add TP1 BTC")
@@ -632,28 +589,25 @@ async def add_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Неверно. Используйте: TP1, TP2, TP3, SL")
         return
     save_stats(stats)
-    await update.message.reply_text(msg, message_thread_id=update.effective_message.message_thread_id)
+    await update.message.reply_text(msg)
     await stats_cmd(update, context)
 
 async def export_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != ALLOWED_CHAT_ID:
-        return
+    if update.effective_chat.id != ALLOWED_CHAT_ID: return
     if os.path.exists(STATS_FILE):
         await update.message.reply_document(document=open(STATS_FILE,"rb"), filename="stats.json")
     else:
         await update.message.reply_text("Нет файла")
 
 async def reset_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != ALLOWED_CHAT_ID:
-        return
+    if update.effective_chat.id != ALLOWED_CHAT_ID: return
     global stats
     stats = {"total":0,"tp1":0,"tp2":0,"tp3":0,"sl":0}
     save_stats(stats)
     await update.message.reply_text("🗑 Статистика сброшена!")
 
 async def auto_stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != ALLOWED_CHAT_ID:
-        return
+    if update.effective_chat.id != ALLOWED_CHAT_ID: return
     total = auto_stats["total"]
     if total == 0:
         await update.message.reply_text("🤖 Нет автосигналов")
@@ -668,11 +622,10 @@ async def auto_stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🎯 TP2: {auto_stats['tp2']} ({auto_stats['tp2']/total*100:.1f}%)
 🎯 TP3: {auto_stats['tp3']} ({auto_stats['tp3']/total*100:.1f}%)
 ❌ SL: {auto_stats['sl']} ({auto_stats['sl']/total*100:.1f}%)"""
-    await update.message.reply_text(msg, message_thread_id=update.effective_message.message_thread_id)
+    await update.message.reply_text(msg)
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != ALLOWED_CHAT_ID:
-        return
+    if update.effective_chat.id != ALLOWED_CHAT_ID: return
     await update.message.reply_text(
         "📚 КОМАНДЫ БОТА\n\n"
         "/BTC (или любая монета) - анализ\n"
@@ -681,14 +634,11 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/add TP1 BTC - добавить результат\n"
         "/export - выгрузить stats.json\n"
         "/reset_stats - сбросить ручную статистику\n"
-        "/get_topic_id - показать ID текущей темы\n"
-        "/help - помощь",
-        message_thread_id=update.effective_message.message_thread_id
+        "/help - помощь"
     )
 
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != ALLOWED_CHAT_ID:
-        return
+    if update.effective_chat.id != ALLOWED_CHAT_ID: return
     await help_cmd(update, context)
 
 # ================= ЗАПУСК =================
@@ -700,14 +650,10 @@ app.add_handler(CommandHandler("autostats", auto_stats_cmd))
 app.add_handler(CommandHandler("add", add_result))
 app.add_handler(CommandHandler("export", export_cmd))
 app.add_handler(CommandHandler("reset_stats", reset_stats))
-app.add_handler(CommandHandler("get_topic_id", get_topic_id))
 app.add_handler(MessageHandler(filters.COMMAND, coin_handler))
 
 async def on_start(app):
-    if TOPIC_ID is not None:
-        await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, message_thread_id=TOPIC_ID, text="🤖 Бот запущен! Автосигналы активны.")
-    else:
-        await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, text="🤖 Бот запущен! Автосигналы активны.\n\nℹ️ Для работы в теме используйте /get_topic_id и затем установите TOPIC_ID.")
+    await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, text="🤖 Бот запущен! Автосигналы активны.")
     asyncio.create_task(check_entries(app))
     asyncio.create_task(scan_market(app))
     asyncio.create_task(check_signal_result(app))
