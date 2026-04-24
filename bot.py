@@ -13,7 +13,7 @@ from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, fil
 # ================= КОНФИГУРАЦИЯ =================
 TOKEN = "8577341778:AAG1vhEXlACi-cdXSpcSpgDtDsJug_F1lIg"
 ALLOWED_CHAT_ID = -1003130189488
-TOPIC_ID = None   # Сначала None (пишет в общий чат), потом замените на число
+TOPIC_ID = 2053   # Сначала None (пишет в общий чат), потом замените на число
 
 SYMBOLS = ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "LINK", "AVAX", "MATIC"]
 COOLDOWN_MINUTES = 30
