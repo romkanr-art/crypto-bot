@@ -1,0 +1,16 @@
+# .gitignore
+.env
+.env.local
+*.env
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+env/
+ENV/
+*.log
+stats.json
+auto_stats.json
+.DS_Store
