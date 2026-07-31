@@ -9,11 +9,15 @@ import os
 from datetime import datetime
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, filters, ContextTypes
+from dotenv import load_dotenv
+
+# Загружаем переменные из .env
+load_dotenv()
 
 # ================= КОНФИГУРАЦИЯ =================
-TOKEN = "8577341778:AAG1vhEXlACi-cdXSpcSpgDtDsJug_F1lIg"
-ALLOWED_CHAT_ID = -1003130189488
-TOPIC_ID = 2053   # Сначала None (пишет в общий чат), потом замените на число
+TOKEN = os.getenv("BOT_TOKEN")
+ALLOWED_CHAT_ID = int(os.getenv("ALLOWED_CHAT_ID"))
+TOPIC_ID = int(os.getenv("TOPIC_ID")) if os.getenv("TOPIC_ID") else None
 
 SYMBOLS = ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "LINK", "AVAX", "MATIC"]
 COOLDOWN_MINUTES = 30
@@ -203,20 +207,6 @@ def generate_signal_id():
     signal_counter += 1
     return int(time.time()*1000) + signal_counter
 
-# ================= УТИЛИТА ДЛЯ ОТПРАВКИ =================
-async def send_message(chat_id, text, thread_id=None, **kwargs):
-    """Отправляет сообщение с учётом TOPIC_ID (если задан)"""
-    if TOPIC_ID is not None:
-        # Если глобально задана тема, то используем её, но только если thread_id не указан (для команд)
-        t_id = TOPIC_ID if thread_id is None else thread_id
-    else:
-        t_id = thread_id
-    # bot – глобальный объект, доступен через context или глобально. Упростим: используем app.bot.
-    # Но в этой функции нет app, поэтому лучше вызывать send_message напрямую с параметром.
-    # Переделаем: функция будет принимать bot как аргумент.
-    # Для простоты я внутри scan_market, check_entries буду вызывать app.bot.send_message явно с параметром message_thread_id.
-    pass  # Эта функция не нужна, будем явно проверять TOPIC_ID в местах отправки.
-
 # ================= БЛОК 1: АНАЛИЗ =================
 async def coin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.id != ALLOWED_CHAT_ID:
@@ -237,7 +227,7 @@ async def coin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     df_4h, _ = get_market_multi(symbol, "4h", preferred_exchange)
 
     if df is None or df_h is None:
-        await update.message.reply_text(f"❌ Монета {symbol} не найдена на {preferred_exchange}")
+        await update.message.reply_text(f" Монета {symbol} не найдена на {preferred_exchange}")
         return
 
     df = add_indicators(df)
@@ -305,7 +295,7 @@ async def coin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ⚡ Сейчас: {now_status}
 
 💰 Сделка:
-{'📈 ЛОНГ' if trend=='LONG' else '📉 ШОРТ'}
+{' ЛОНГ' if trend=='LONG' else '📉 ШОРТ'}
 
 Вход: {fmt(entry)}
 Стоп: {fmt(stop)}
@@ -316,11 +306,10 @@ async def coin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 📊 Волатильность: {volatility:.2f}%
 
-🦿 Рекомендуемое плечо: {rec_leverage}x
+ Рекомендуемое плечо: {rec_leverage}x
 
 ⚠️ Вход не более 1-2% от депозита. Оценивайте свои финансовые риски.
 """
-    # Отправляем в ту же тему, откуда пришла команда (если это тема)
     thread = update.effective_message.message_thread_id
     await update.message.reply_text(msg, message_thread_id=thread)
 
@@ -330,7 +319,7 @@ async def coin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "zone_low": low, "zone_high": high, "trend": trend,
             "entry": entry, "stop": stop, "tp1": tp1, "tp2": tp2, "tp3": tp3,
             "chat_id": update.effective_chat.id,
-            "thread_id": thread,  # запоминаем ID темы, чтобы потом отвечать туда
+            "thread_id": thread,
             "expires_at": expires_at,
             "exchange": source
         }
@@ -367,7 +356,7 @@ async def check_entries(app):
 ✅ ЦЕНА ВОШЛА В ЗОНУ!
 
 📍 Зона: {fmt(data['zone_low'])} - {fmt(data['zone_high'])}
-💰 Текущая цена: {fmt(current_price)}
+ Текущая цена: {fmt(current_price)}
 
 🎯 Вход: {fmt(data['entry'])} | Стоп: {fmt(data['stop'])}
 🎯 TP1: {fmt(data['tp1'])} | TP2: {fmt(data['tp2'])} | TP3: {fmt(data['tp3'])}
@@ -410,7 +399,7 @@ async def scan_market(app):
                     strength_score = 2
                     min_vol_ratio = 1.5
                 else:
-                    strength = "🔥 СЛАБЫЙ (1/3)"
+                    strength = " СЛАБЫЙ (1/3)"
                     strength_score = 1
                     min_vol_ratio = 2.0
 
@@ -462,14 +451,13 @@ async def scan_market(app):
                 last_signal_time[symbol] = now
                 last_signal_price[symbol] = current_price
 
-                # Отправляем в глобальную тему, если задана, иначе в общий чат
                 await app.bot.send_message(
                     chat_id=ALLOWED_CHAT_ID,
-                    message_thread_id=TOPIC_ID,  # если None, то игнорируется
-                    text=f"""🚨 АВТОСИГНАЛ! {symbol}/USDT 🚨
+                    message_thread_id=TOPIC_ID,
+                    text=f""" АВТОСИГНАЛ! {symbol}/USDT 🚨
 
 📍 Источник: {source}
-📊 Тренд: {'📈 ЛОНГ' if trend=='LONG' else '📉 ШОРТ'}
+📊 Тренд: {' ЛОНГ' if trend=='LONG' else '📉 ШОРТ'}
 💪 Сила сигнала: {strength}
 
 ✅ ТОЧКА ВХОДА!
@@ -545,12 +533,12 @@ async def check_signal_result(app):
                 if current_price <= tp3:
                     auto_stats["tp3"] += 1
                     auto_stats["total"] += 1
-                    await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, message_thread_id=TOPIC_ID, text=f"🎯 АВТОСИГНАЛ {symbol} ДОСТИГ TP3!\n💰 Вход: {fmt(entry)} → {fmt(current_price)}")
+                    await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, message_thread_id=TOPIC_ID, text=f" АВТОСИГНАЛ {symbol} ДОСТИГ TP3!\n💰 Вход: {fmt(entry)} → {fmt(current_price)}")
                     del auto_stats["pending"][sid]
                 elif current_price <= tp2:
                     auto_stats["tp2"] += 1
                     auto_stats["total"] += 1
-                    await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, message_thread_id=TOPIC_ID, text=f"🎯 АВТОСИГНАЛ {symbol} ДОСТИГ TP2!\n💰 Вход: {fmt(entry)} → {fmt(current_price)}")
+                    await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, message_thread_id=TOPIC_ID, text=f"🎯 АВТОСИГНАЛ {symbol} ДОСТИГ TP2!\n Вход: {fmt(entry)} → {fmt(current_price)}")
                     del auto_stats["pending"][sid]
                 elif current_price <= tp1:
                     auto_stats["tp1"] += 1
@@ -560,33 +548,32 @@ async def check_signal_result(app):
                 elif current_price >= stop:
                     auto_stats["sl"] += 1
                     auto_stats["total"] += 1
-                    await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, message_thread_id=TOPIC_ID, text=f"❌ АВТОСИГНАЛ {symbol} СРАБОТАЛ СТОП!\n💰 Вход: {fmt(entry)} → {fmt(current_price)}")
+                    await app.bot.send_message(chat_id=ALLOWED_CHAT_ID, message_thread_id=TOPIC_ID, text=f" АВТОСИГНАЛ {symbol} СРАБОТАЛ СТОП!\n💰 Вход: {fmt(entry)} → {fmt(current_price)}")
                     del auto_stats["pending"][sid]
             save_auto_stats(auto_stats)
         await asyncio.sleep(300)
 
 # ================= КОМАНДЫ =================
 async def get_topic_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показывает ID текущей темы (если команда вызвана в теме)"""
     if update.effective_chat.id != ALLOWED_CHAT_ID:
         await update.message.reply_text("❌ Недостаточно прав.")
         return
     thread_id = update.effective_message.message_thread_id
     if thread_id:
-        await update.message.reply_text(f"🆔 ID этой темы: `{thread_id}`")
+        await update.message.reply_text(f" ID этой темы: `{thread_id}`")
     else:
         await update.message.reply_text("ℹ️ Эта команда работает только в темах (не в общем чате).\n\nЕсли вы хотите, чтобы бот писал в тему, создайте тему, перейдите в неё и напишите /get_topic_id. Затем установите полученный ID в переменную TOPIC_ID в коде.")
 
 async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.id != ALLOWED_CHAT_ID: return
     if stats["total"] == 0:
-        await update.message.reply_text("📊 Нет данных по сделкам")
+        await update.message.reply_text(" Нет данных по сделкам")
         return
     t = stats["total"]
     winrate = (stats['tp1']+stats['tp2']+stats['tp3'])/t*100
     msg = f"""📊 СТАТИСТИКА СИГНАЛОВ
 ━━━━━━━━━━━━━━━━━━━
-📈 Всего: {t}
+ Всего: {t}
 ✅ Винрейт: {winrate:.1f}%
 🎯 TP1: {stats['tp1']} ({stats['tp1']/t*100:.1f}%)
 🎯 TP2: {stats['tp2']} ({stats['tp2']/t*100:.1f}%)
